@@ -1,0 +1,37 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Personal recordings, training data, and model artifacts
+/data/
+/recordings/
+/datasets/
+/models/
+/runs/
+/artifacts/
+*.mp4
+*.mov
+*.webm
+*.avi
+*.mkv
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*.mlmodel
+*.mlpackage/
+*.task
+
+# Development output
+node_modules/
+dist/
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+.DS_Store
