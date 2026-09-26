@@ -13,7 +13,6 @@ import {
   Film,
   FlaskConical,
   FolderOpen,
-  Headphones,
   Info,
   Maximize2,
   Play,
@@ -51,48 +50,36 @@ import type {
 const DRILLS = [
   {
     id: "jab",
-    title: "Find your jab",
-    subtitle: "Single lead straights",
-    number: "01",
-    tags: "FOUNDATIONS",
+    title: "Jab",
     sequence: ["Jab"],
     tip: "Throw a comfortable lead straight, then settle back into your chosen guard. Leave a little space between repetitions.",
   },
   {
     id: "cross",
-    title: "Build your cross",
-    subtitle: "Single rear straights",
-    number: "02",
-    tags: "FOUNDATIONS",
+    title: "Cross",
     sequence: ["Cross"],
     tip: "Practice a controlled rear straight. Reset between repetitions and keep both hands inside the camera view.",
   },
   {
     id: "one-two",
-    title: "Connect the 1–2",
-    subtitle: "Jab → cross",
-    number: "03",
-    tags: "COMBINATIONS",
+    title: "1–2",
     sequence: ["Jab", "Cross"],
     tip: "Link a jab and a cross at a comfortable pace. Pause briefly between combinations. The timeline shows what was detected.",
   },
   {
     id: "open",
-    title: "Move your way",
-    subtitle: "Open practice & capture",
-    number: "04",
-    tags: "EXPLORATION",
+    title: "Free practice",
     sequence: ["Move", "Reset"],
-    tip: "Use the camera and replay to explore your movement. Only experimental straight-punch events are currently recognized; other techniques need manual labels.",
+    tip: "Practice at your own pace. This preview counts jabs and crosses only.",
   },
 ];
 type View = "studio" | "review" | "lab";
 
 function App() {
   const [view, setView] = useState<View>("studio");
-  const [drill, setDrill] = useState("one-two");
+  const [drill, setDrill] = useState("open");
   const [stance, setStance] = useState<Stance>("orthodox");
-  const [duration, setDuration] = useState(120);
+  const [duration, setDuration] = useState(60);
   const [model, setModel] = useState<ModelVariant>("full");
   const [mirror, setMirror] = useState(true);
   const [overlay, setOverlay] = useState(true);
@@ -343,10 +330,10 @@ function App() {
   const motionOnly = !selected?.video;
   const title =
     view === "studio"
-      ? "Your next good round."
+      ? "Practice"
       : view === "review"
-        ? "See what happened."
-        : "Earn every observation.";
+        ? "Review"
+        : "Diagnostics";
 
   return (
     <div className="app-shell">
@@ -385,29 +372,7 @@ function App() {
               <span className="nav-count">{sessions.length}</span>
             )}
           </button>
-          <button
-            className={`nav-item ${view === "lab" ? "active" : ""}`}
-            onClick={() => void navigate("lab")}
-          >
-            <FlaskConical size={19} /> <span>Measurement lab</span>
-          </button>
         </nav>
-        <div className="sidebar-note">
-          <span className="tiny-label">A LITTLE BETTER, EVERY ROUND</span>
-          <p>
-            One focus.
-            <br />A few good reps.
-            <br />
-            Something to build on.
-          </p>
-          <div className="round-lines">
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-          </div>
-        </div>
         <div className="sidebar-bottom">
           <div className="local-badge">
             <ShieldCheck size={17} />
@@ -425,37 +390,14 @@ function App() {
         </div>
       </aside>
       <main>
-        <header className="topbar">
-          <div className="breadcrumb">
-            WORKSPACE <span>/</span>{" "}
-            <strong>
-              {view === "studio"
-                ? "TRAINING"
-                : view === "review"
-                  ? "REVIEW"
-                  : "RESEARCH"}
-            </strong>
-          </div>
-          <div className="topbar-status">
-            <span className="status-dot" /> LOCAL SESSION{" "}
-            <span className="topbar-divider" /> <span>NO ACCOUNT NEEDED</span>
-          </div>
-        </header>
         <div className="page-heading">
           <div>
-            <span className="eyebrow">
-              {view === "studio"
-                ? "SHOW UP. FIND YOUR RHYTHM."
-                : view === "review"
-                  ? "OBSERVE. LABEL. LEARN."
-                  : "MEASURE BEFORE YOU TRUST."}
-            </span>
             <h1>{title}</h1>
             <p>
               {view === "studio"
-                ? "A focused space for shadowboxing, with movement you can replay."
+                ? "Enable your camera, confirm your setup, then start a round."
                 : view === "review"
-                  ? "Your rounds stay on this device. Inspect a moment, add a label, take the evidence with you."
+                  ? "Watch your round, then check the experimental punch detections."
                   : "Understand what the camera sees, and where the prototype still needs validation."}
             </p>
           </div>
@@ -508,13 +450,8 @@ function App() {
                   </div>
                   <PoseOverlay frame={demoFrame(0)} mirror={false} silhouette />
                   <div className="idle-copy">
-                    <span className="tiny-label">A SPACE TO GET BETTER</span>
-                    <h2>Step into your corner.</h2>
-                    <p>
-                      Frame your head, hands, and full reach.
-                      <br />
-                      We’ll take it one round at a time.
-                    </p>
+                    <h2>Set up your camera.</h2>
+                    <p>Keep your head, hips, and full arm reach in view.</p>
                     <button
                       className="button primary"
                       onClick={() => void startSource("camera")}
@@ -561,13 +498,6 @@ function App() {
                         : "CAMERA OFF"}
                 </span>
                 <div className="stage-top-right">
-                  {studio.status === "ready" && (
-                    <span className="stage-fps">
-                      {studio.source === "demo"
-                        ? "SYNTHETIC"
-                        : `${Math.round(studio.fps)} POSE FPS`}
-                    </span>
-                  )}
                   <button
                     aria-label="Fullscreen camera"
                     onClick={() =>
@@ -688,11 +618,11 @@ function App() {
               </div>
               <div className="round-count">
                 <strong>{leadCount.toString().padStart(2, "0")}</strong>
-                <span>JAB CANDIDATES</span>
+                <span>Jabs</span>
               </div>
               <div className="round-count">
                 <strong>{rearCount.toString().padStart(2, "0")}</strong>
-                <span>CROSS CANDIDATES</span>
+                <span>Crosses</span>
               </div>
               <button
                 className={`button ${studio.running ? "danger" : "primary"} round-start`}
@@ -709,6 +639,17 @@ function App() {
                     : "Start round"}
               </button>
             </div>
+            {!studio.running && !completeId && (
+              <p className="next-step">
+                {!studio.source
+                  ? "First, enable your camera."
+                  : studio.status === "loading"
+                    ? "Preparing the camera and local model…"
+                    : !canBegin
+                      ? "Confirm your camera setup to unlock Start round."
+                      : "Ready. Start your round when you are in position."}
+              </p>
+            )}
             {completeId && (
               <div className="completed-banner">
                 <CheckCircle2 size={20} />
@@ -731,66 +672,33 @@ function App() {
               </div>
             )}
 
-            <div className="section-label">
-              <h2>Choose your focus</h2>
-              <span>BUILD THE FUNDAMENTALS</span>
-            </div>
-            <div className="drill-grid">
-              {DRILLS.map((d) => (
-                <button
-                  key={d.id}
-                  className={`drill-card ${drill === d.id ? "selected" : ""}`}
-                  disabled={studio.running}
-                  onClick={() => setDrill(d.id)}
-                >
-                  <div className="drill-card-top">
-                    <span>{d.number}</span>
-                    {drill === d.id ? (
-                      <CheckCircle2 size={18} />
-                    ) : (
-                      <ArrowRight size={17} />
-                    )}
-                  </div>
-                  <span className="drill-tag">{d.tags}</span>
-                  <h3>{d.title}</h3>
-                  <p>{d.subtitle}</p>
-                </button>
-              ))}
-            </div>
             <div className="evidence-note">
               <FlaskConical size={16} />
               <p>
-                <strong>Built to show its work.</strong> Punch events are
-                experimental candidates. Technique corrections remain off until
-                coach-reviewed validation.
+                Punch counts are experimental. Technique corrections are not
+                enabled yet.
               </p>
             </div>
           </div>
 
           <aside className="session-panel">
-            <div className="panel-title">
-              <span className="tiny-label">THIS ROUND</span>
-              <span className="live-preview">PREVIEW</span>
+            <h2>Round setup</h2>
+            <div className="settings-row">
+              <label htmlFor="drill">Drill</label>
+              <select
+                id="drill"
+                value={drill}
+                disabled={studio.running}
+                onChange={(e) => setDrill(e.target.value)}
+              >
+                {DRILLS.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.title}
+                  </option>
+                ))}
+              </select>
             </div>
-            <h2>{activeDrill.title}</h2>
             <p className="panel-description">{activeDrill.tip}</p>
-            <div className="sequence">
-              {activeDrill.sequence.map((s, i) => (
-                <span key={s}>
-                  {i > 0 && <ArrowRight size={15} />}
-                  <b>
-                    {s === "Jab"
-                      ? "1"
-                      : s === "Cross"
-                        ? "2"
-                        : s === "Move"
-                          ? "∞"
-                          : "↺"}
-                  </b>
-                  <small>{s}</small>
-                </span>
-              ))}
-            </div>
             <div className="panel-divider" />
             <label className="field-label">YOUR STANCE</label>
             <div className="segmented">
@@ -834,28 +742,6 @@ function App() {
                 <option value={600}>10 minutes</option>
               </select>
             </div>
-            <div className="settings-row">
-              <label htmlFor="model">Pose model</label>
-              <select
-                id="model"
-                value={model}
-                disabled={!!studio.source}
-                onChange={(e) => setModel(e.target.value as ModelVariant)}
-              >
-                <option value="full">Full · balanced</option>
-                <option value="heavy">Heavy · detailed</option>
-                <option value="lite">Lite · lighter</option>
-              </select>
-            </div>
-            <label className="switch-row">
-              <span>Mirror preview</span>
-              <input
-                type="checkbox"
-                checked={mirror}
-                onChange={(e) => setMirror(e.target.checked)}
-              />
-              <span className="switch" />
-            </label>
             <label className="switch-row">
               <span>
                 Save round video <small>Optional · local only</small>
@@ -868,35 +754,27 @@ function App() {
               />
               <span className="switch" />
             </label>
-            <label className="switch-row">
-              <span>
-                {sound ? <Volume2 size={15} /> : <VolumeX size={15} />} Drill
-                callouts <small>Prompts, not technique judgments</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={sound}
-                onChange={(e) => setSound(e.target.checked)}
-              />
-              <span className="switch" />
-            </label>
             <div className="panel-divider" />
             <div className="setup-title">
               <Crosshair size={16} />
-              <h3>Before the bell</h3>
+              <h3>Confirm camera setup</h3>
               {calibrated && <CheckCircle2 size={16} />}
             </div>
-            <ol className="setup-list">
-              <li>
-                <span>01</span>Keep your head and full arm reach in frame.
-              </li>
-              <li>
-                <span>02</span>Use even light. Leave space around your hands.
-              </li>
-              <li>
-                <span>03</span>Confirm the stance and anatomical side mapping.
-              </li>
-            </ol>
+            {studio.status !== "ready" && (
+              <ol className="setup-list">
+                <li>
+                  <span>01</span>Keep your head, hips, and full arm reach in
+                  frame.
+                </li>
+                <li>
+                  <span>02</span>Use even light. Leave space around your hands.
+                </li>
+                <li>
+                  <span>03</span>Raise your left hand. Check that the L label
+                  follows it.
+                </li>
+              </ol>
+            )}
             {studio.source === "camera" &&
               studio.status === "ready" &&
               !calibrated && (
@@ -907,7 +785,7 @@ function App() {
                       checked={sideConfirmed}
                       onChange={(e) => setSideConfirmed(e.target.checked)}
                     />
-                    I raised my left hand and confirmed the overlay follows it.
+                    I raised my left hand and the L label follows it.
                   </label>
                   <button
                     className="button secondary"
@@ -944,13 +822,49 @@ function App() {
                 </small>
               </div>
             )}
-            <div className="listen-note">
-              <Headphones size={17} />
-              <p>
-                Keep your eyes on your practice. Review the details after the
-                round.
-              </p>
-            </div>
+            <details className="optional-controls">
+              <summary>More options</summary>
+              <div className="settings-row">
+                <label htmlFor="model">Pose model</label>
+                <select
+                  id="model"
+                  value={model}
+                  disabled={!!studio.source}
+                  onChange={(e) => setModel(e.target.value as ModelVariant)}
+                >
+                  <option value="full">Full · balanced</option>
+                  <option value="heavy">Heavy · detailed</option>
+                  <option value="lite">Lite · lighter</option>
+                </select>
+              </div>
+              <label className="switch-row">
+                <span>Mirror preview</span>
+                <input
+                  type="checkbox"
+                  checked={mirror}
+                  onChange={(e) => setMirror(e.target.checked)}
+                />
+                <span className="switch" />
+              </label>
+              <label className="switch-row">
+                <span>
+                  {sound ? <Volume2 size={15} /> : <VolumeX size={15} />} Drill
+                  callouts <small>Prompts, not technique judgments</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={sound}
+                  onChange={(e) => setSound(e.target.checked)}
+                />
+                <span className="switch" />
+              </label>
+              <button
+                className="text-button"
+                onClick={() => void navigate("lab")}
+              >
+                Advanced diagnostics <ArrowRight size={14} />
+              </button>
+            </details>
           </aside>
         </section>
 
@@ -1143,32 +1057,6 @@ function App() {
                   />
                   <span>{formatTime(selected.durationMs)}</span>
                 </div>
-                <div className="review-stats">
-                  <div>
-                    <strong>{selected.events.length}</strong>
-                    <span>Straight candidates</span>
-                  </div>
-                  <div>
-                    <strong>
-                      {selected.source === "demo"
-                        ? "—"
-                        : Math.round(selected.measuredFps)}
-                    </strong>
-                    <span>Processed pose FPS</span>
-                  </div>
-                  <div>
-                    <strong>
-                      {selected.source === "demo"
-                        ? "—"
-                        : `${Math.round(selected.inferenceP95)} ms`}
-                    </strong>
-                    <span>p95 model inference</span>
-                  </div>
-                  <div>
-                    <strong>{selected.annotations.length}</strong>
-                    <span>Manual labels</span>
-                  </div>
-                </div>
                 <div className="section-label">
                   <h2>Movement timeline</h2>
                   <button
@@ -1182,11 +1070,17 @@ function App() {
                   </button>
                 </div>
                 <p className="section-description">
-                  Model suggestions can bias annotation. Keep detections hidden
-                  when creating reference labels. Select an event to inspect its
-                  motion. These are heuristic straight-punch candidates, not
-                  validated technique assessments.
+                  Watch the video first, then reveal detections to compare.
+                  Counts can miss punches or count other movement.
                 </p>
+                {showPredictions && (
+                  <p className="review-counts">
+                    Jab estimates:{" "}
+                    {selected.events.filter((e) => e.label === "jab").length}
+                    {" · "}Cross estimates:{" "}
+                    {selected.events.filter((e) => e.label === "cross").length}
+                  </p>
+                )}
                 <div className="event-timeline" hidden={!showPredictions}>
                   {selected.events.length ? (
                     selected.events.map((event, i) => (
@@ -1227,148 +1121,189 @@ function App() {
                     </div>
                   )}
                 </div>
-                <div className="annotation-panel">
-                  <div className="section-label">
-                    <h2>Add a reference label</h2>
-                    <span>MANUAL ANNOTATION</span>
-                  </div>
-                  <p className="section-description">
-                    Label the original video where available. Mark definite
-                    false detections “other”; use “unobservable” only when
-                    judgment is impossible. Motion-only replays cannot
-                    independently validate the pose model. Technique correctness
-                    needs coach review.
-                  </p>
-                  <div className="annotation-fields">
-                    <label>
-                      Action
-                      <select
-                        aria-label="Annotation action"
-                        value={annotationLabel}
-                        onChange={(e) =>
-                          setAnnotationLabel(
-                            e.target.value as SessionAnnotation["label"],
-                          )
-                        }
-                      >
-                        {[
-                          "jab",
-                          "cross",
-                          "hook",
-                          "uppercut",
-                          "other",
-                          "unobservable",
-                        ].map((v) => (
-                          <option key={v} value={v}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Hand
-                      <select
-                        aria-label="Annotation hand"
-                        value={annotationHand}
-                        onChange={(e) =>
-                          setAnnotationHand(
-                            e.target.value as SessionAnnotation["hand"],
-                          )
-                        }
-                      >
-                        <option>left</option>
-                        <option>right</option>
-                        <option>unknown</option>
-                      </select>
-                    </label>
-                    <label>
-                      Start (s)
+                <details
+                  className="optional-controls"
+                  key={`labels-${selected.id}`}
+                >
+                  <summary>Label this round (optional)</summary>
+                  <div className="annotation-panel">
+                    <div className="section-label">
+                      <h2>Add a reference label</h2>
+                      <span>MANUAL ANNOTATION</span>
+                    </div>
+                    <p className="section-description">
+                      Label the original video where available. Mark definite
+                      false detections “other”; use “unobservable” only when
+                      judgment is impossible. Motion-only replays cannot
+                      independently validate the pose model. Technique
+                      correctness needs coach review.
+                    </p>
+                    <div className="annotation-fields">
+                      <label>
+                        Action
+                        <select
+                          aria-label="Annotation action"
+                          value={annotationLabel}
+                          onChange={(e) =>
+                            setAnnotationLabel(
+                              e.target.value as SessionAnnotation["label"],
+                            )
+                          }
+                        >
+                          {[
+                            "jab",
+                            "cross",
+                            "hook",
+                            "uppercut",
+                            "other",
+                            "unobservable",
+                          ].map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Hand
+                        <select
+                          aria-label="Annotation hand"
+                          value={annotationHand}
+                          onChange={(e) =>
+                            setAnnotationHand(
+                              e.target.value as SessionAnnotation["hand"],
+                            )
+                          }
+                        >
+                          <option>left</option>
+                          <option>right</option>
+                          <option>unknown</option>
+                        </select>
+                      </label>
+                      <label>
+                        Start (s)
+                        <input
+                          aria-label="Annotation start"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={annotationStart}
+                          onChange={(e) =>
+                            setAnnotationStart(Number(e.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        End (s)
+                        <input
+                          aria-label="Annotation end"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={annotationEnd}
+                          onChange={(e) =>
+                            setAnnotationEnd(Number(e.target.value))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <div className="annotation-note">
                       <input
-                        aria-label="Annotation start"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={annotationStart}
-                        onChange={(e) =>
-                          setAnnotationStart(Number(e.target.value))
-                        }
+                        aria-label="Annotation note"
+                        placeholder="What is visible? Any uncertainty?"
+                        value={annotationNote}
+                        maxLength={1000}
+                        onChange={(e) => setAnnotationNote(e.target.value)}
                       />
-                    </label>
-                    <label>
-                      End (s)
-                      <input
-                        aria-label="Annotation end"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={annotationEnd}
-                        onChange={(e) =>
-                          setAnnotationEnd(Number(e.target.value))
-                        }
-                      />
-                    </label>
-                  </div>
-                  <div className="annotation-note">
-                    <input
-                      aria-label="Annotation note"
-                      placeholder="What is visible? Any uncertainty?"
-                      value={annotationNote}
-                      maxLength={1000}
-                      onChange={(e) => setAnnotationNote(e.target.value)}
-                    />
-                    <button className="button primary" onClick={addAnnotation}>
-                      <Plus size={16} /> Add label
-                    </button>
-                  </div>
-                  {selected.annotations.map((a) => (
-                    <div className="annotation-row" key={a.id}>
-                      <button onClick={() => seek(a.startMs)}>
-                        <span>
-                          {(a.startMs / 1000).toFixed(2)}–
-                          {(a.endMs / 1000).toFixed(2)}s
-                        </span>
-                        <strong>
-                          {a.label} · {a.hand}
-                        </strong>
-                        <small>{a.note || "No note"}</small>
-                      </button>
                       <button
-                        className="icon-button"
-                        aria-label="Delete annotation"
-                        onClick={() =>
-                          void updateSession({
-                            ...selected,
-                            annotationsComplete: false,
-                            annotations: selected.annotations.filter(
-                              (x) => x.id !== a.id,
-                            ),
-                          })
-                        }
+                        className="button primary"
+                        onClick={addAnnotation}
                       >
-                        <X size={15} />
+                        <Plus size={16} /> Add label
                       </button>
                     </div>
-                  ))}
-                  <label className="complete-annotation">
-                    <input
-                      type="checkbox"
-                      checked={!!selected.annotationsComplete}
-                      onChange={(e) =>
-                        void updateSession({
-                          ...selected,
-                          annotationsComplete: e.target.checked,
-                        })
-                      }
-                    />{" "}
-                    I reviewed the entire round and labeled every action,
-                    including missed detections.
-                  </label>
-                </div>
+                    {selected.annotations.map((a) => (
+                      <div className="annotation-row" key={a.id}>
+                        <button onClick={() => seek(a.startMs)}>
+                          <span>
+                            {(a.startMs / 1000).toFixed(2)}–
+                            {(a.endMs / 1000).toFixed(2)}s
+                          </span>
+                          <strong>
+                            {a.label} · {a.hand}
+                          </strong>
+                          <small>{a.note || "No note"}</small>
+                        </button>
+                        <button
+                          className="icon-button"
+                          aria-label="Delete annotation"
+                          onClick={() =>
+                            void updateSession({
+                              ...selected,
+                              annotationsComplete: false,
+                              annotations: selected.annotations.filter(
+                                (x) => x.id !== a.id,
+                              ),
+                            })
+                          }
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ))}
+                    <label className="complete-annotation">
+                      <input
+                        type="checkbox"
+                        checked={!!selected.annotationsComplete}
+                        onChange={(e) =>
+                          void updateSession({
+                            ...selected,
+                            annotationsComplete: e.target.checked,
+                          })
+                        }
+                      />{" "}
+                      I reviewed the entire round and labeled every action,
+                      including missed detections.
+                    </label>
+                  </div>
+                </details>
+                <details
+                  className="optional-controls"
+                  key={`metrics-${selected.id}`}
+                >
+                  <summary>Technical details</summary>
+                  <div className="review-stats">
+                    <div>
+                      <strong>{selected.events.length}</strong>
+                      <span>Straight candidates</span>
+                    </div>
+                    <div>
+                      <strong>
+                        {selected.source === "demo"
+                          ? "—"
+                          : Math.round(selected.measuredFps)}
+                      </strong>
+                      <span>Processed pose FPS</span>
+                    </div>
+                    <div>
+                      <strong>
+                        {selected.source === "demo"
+                          ? "—"
+                          : `${Math.round(selected.inferenceP95)} ms`}
+                      </strong>
+                      <span>p95 model inference</span>
+                    </div>
+                    <div>
+                      <strong>{selected.annotations.length}</strong>
+                      <span>Manual labels</span>
+                    </div>
+                  </div>
+                </details>
               </div>
             ) : (
               <div className="review-placeholder">
                 <FolderOpen size={42} />
-                <h2>Your evidence lives here.</h2>
+                <h2>Your saved rounds appear here.</h2>
                 <p>
                   Record a round or explore the simulated demo.
                   <br />
@@ -1610,7 +1545,7 @@ function App() {
               <X size={20} />
             </button>
             <span className="tiny-label">WELCOME TO YOUR CORNER</span>
-            <h2 id="help-title">A good place to start.</h2>
+            <h2 id="help-title">Camera → round → review</h2>
             <p>
               Enable your camera, choose a stance and drill, and keep your head,
               hips, elbows, and hands visible. Confirm your setup, then start a
@@ -1648,7 +1583,7 @@ function App() {
               </div>
             </div>
             <button className="button primary" onClick={() => setHelp(false)}>
-              Find my rhythm <ArrowRight size={17} />
+              Got it <Check size={17} />
             </button>
           </section>
         </div>

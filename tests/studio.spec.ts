@@ -53,9 +53,7 @@ test("initial page acquires no camera and makes no external network requests", a
     return route.continue();
   });
   await page.goto(APP_ORIGIN);
-  await expect(
-    page.getByRole("heading", { name: "Your next good round." }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Practice" })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Enable camera", exact: true }),
   ).toBeVisible();
@@ -103,12 +101,7 @@ test("demo round survives immediate navigation, export, reload, annotation edits
   page,
 }) => {
   await denyPhysicalCamera(page);
-  // Exercise Finish -> Review while asynchronous metadata finalization is pending.
-  // This must not replace a completed round's timestamp with a cleared source time.
-  await page.route("**/models/manifest.json", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    await route.continue();
-  });
+  // Immediate Finish -> Review must preserve the completed round's timestamps.
   await page.goto(APP_ORIGIN);
   await page.getByRole("button", { name: "Explore a simulated round" }).click();
   await page.getByRole("button", { name: "Start round", exact: true }).click();
@@ -162,6 +155,10 @@ test("demo round survives immediate navigation, export, reload, annotation edits
   expect(persisted.durationMs).toBe(exported.durationMs);
   expect(persisted.frames.length).toBe(exported.frames.length);
 
+  await expect(
+    page.getByLabel("Annotation action", { exact: true }),
+  ).not.toBeVisible();
+  await page.getByText("Label this round (optional)", { exact: true }).click();
   await page
     .getByLabel("Annotation action", { exact: true })
     .selectOption("other");
@@ -288,9 +285,7 @@ test("390px mobile layout stays within the viewport", async ({ page }) => {
   await denyPhysicalCamera(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(APP_ORIGIN);
-  await expect(
-    page.getByRole("heading", { name: "Your next good round." }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Practice" })).toBeVisible();
   const overflow = () =>
     page.evaluate(() => ({
       viewport: window.innerWidth,

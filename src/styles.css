@@ -787,9 +787,9 @@ main {
   letter-spacing: -1px;
 }
 .round-count span {
-  font: 7px var(--mono);
-  letter-spacing: 0.7px;
-  color: #8b977f;
+  font-size: 9px;
+  letter-spacing: 0;
+  color: #a5b299;
   white-space: nowrap;
 }
 .round-start {
@@ -916,7 +916,7 @@ main {
   font-weight: 500;
 }
 .panel-description {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.8;
   color: #a0ac95;
   margin-top: 12px;
@@ -955,11 +955,41 @@ main {
   margin: 24px 0;
 }
 .field-label {
-  font: 8px var(--mono);
+  font: 10px var(--mono);
   letter-spacing: 1.1px;
   color: #b0bca6;
   display: block;
   margin-bottom: 10px;
+}
+.optional-controls {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.optional-controls > summary {
+  color: #b7c4ab;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 5px 0;
+}
+.optional-controls > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+.optional-controls > .text-button {
+  margin-top: 20px;
+}
+.next-step {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.review-counts {
+  margin: 16px 0;
+  color: var(--accent);
+  font-size: 14px;
 }
 .segmented {
   display: flex;
@@ -975,7 +1005,7 @@ main {
   background: transparent;
   color: #899b7b;
   padding: 9px 5px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .segmented button[aria-pressed="true"] {
   background: #38482c;
@@ -983,7 +1013,7 @@ main {
 }
 .field-hint {
   color: #819273;
-  font-size: 9px;
+  font-size: 11px;
   margin-top: 8px;
   margin-bottom: 20px;
 }
@@ -993,11 +1023,11 @@ main {
   justify-content: space-between;
   gap: 10px;
   margin: 15px 0;
-  font-size: 10px;
+  font-size: 12px;
   color: #b1bfa6;
 }
 .settings-row select {
-  font-size: 9px;
+  font-size: 11px;
   background: #171f12;
   border: 1px solid #3e4b32;
   border-radius: 4px;
@@ -1010,7 +1040,7 @@ main {
   justify-content: space-between;
   gap: 12px;
   margin-top: 18px;
-  font-size: 10px;
+  font-size: 12px;
   color: #b1bfa6;
   cursor: pointer;
   position: relative;
@@ -1023,7 +1053,7 @@ main {
 }
 .switch-row small {
   display: block;
-  font-size: 8px;
+  font-size: 10px;
   color: #788c69;
   margin-top: 3px;
 }
@@ -1075,7 +1105,7 @@ main {
   color: #b2c49e;
 }
 .setup-title h3 {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   flex: 1;
 }
@@ -1090,7 +1120,7 @@ main {
 .setup-list li {
   display: flex;
   gap: 10px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.6;
   color: #889b7a;
 }
@@ -1910,7 +1940,7 @@ dd {
     font-size: 22px;
   }
   .round-count span {
-    font-size: 6px;
+    font-size: 9px;
   }
   .round-start {
     padding: 10px 12px;
@@ -2246,7 +2276,7 @@ dd {
     font-size: 22px;
   }
   .round-count span {
-    font-size: 5.5px;
+    font-size: 9px;
     letter-spacing: 0.2px;
   }
   .round-start {

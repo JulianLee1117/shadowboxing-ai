@@ -145,9 +145,7 @@ test.describe("actual local MediaPipe runtime", () => {
     await page
       .getByRole("button", { name: "Review round", exact: false })
       .click();
-    await expect(
-      page.getByRole("heading", { name: "See what happened." }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Review" })).toBeVisible();
     const replay = page.locator(".replay-stage video");
     await expect(replay).toBeVisible();
     await expect(replay).toHaveAttribute("src", /^blob:/);

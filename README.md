@@ -20,7 +20,9 @@ Desktop Chromium is the verified browser target. Camera access requires localhos
 
 ## First round
 
-1. Select a drill, stance, round length, and model. **Explore a simulated round** works without a camera; synthetic data is labeled and excluded from real accuracy reports.
+Start with [the five-minute test checklist](docs/first-user-test.md). The studio defaults to one minute of free practice. Model settings and diagnostics are under **More options**; reference labels and telemetry are collapsed in review.
+
+1. Select a drill and stance. The default round is one minute; leave **More options** alone for your first test. **Explore a simulated round** works without a camera; synthetic data is labeled and excluded from real accuracy reports.
 2. Enable the camera. Frame your head, shoulders, hips, elbows and hands, including full reach. Improve lighting or try an oblique view if a hand disappears.
 3. Raise your left hand and verify that the **L** wrist label follows it. Confirm the setup. Preview mirroring never changes anatomical labels.
 4. Turn on **Save round video** if you want original-video replay. It is off by default, and no microphone is requested.
