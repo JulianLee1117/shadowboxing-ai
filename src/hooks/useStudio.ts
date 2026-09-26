@@ -161,6 +161,10 @@ export function useStudio(onComplete: (session: Session) => void) {
         : (videoRef.current?.currentTime ?? lastSource.current / 1000) * 1000;
     const durationMs = Math.max(
       0,
+      // A captured frame can still be in flight. Its media timestamp may lead
+      // the wall clock slightly; freeze both boundaries before draining it.
+      // Every accepted late result is bounded by this same endSource below.
+      endSource - data.start,
       data.source === "file"
         ? endSource - data.start
         : performance.now() - data.startedAt,

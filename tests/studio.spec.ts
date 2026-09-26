@@ -1087,3 +1087,129 @@ test("detection recheck is temporary and exports separately from original eviden
   await page.locator(".round-library .session-item").first().click();
   expect(await readExport(page)).toEqual(original);
 });
+
+test("a late in-flight camera frame stays inside the frozen media duration", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const state = window as unknown as {
+      mediaMs: number;
+      callback?: VideoFrameRequestCallback;
+      pendingReply?: () => void;
+    };
+    state.mediaMs = 10_000;
+    Object.defineProperty(HTMLVideoElement.prototype, "currentTime", {
+      configurable: true,
+      get: () => state.mediaMs / 1000,
+      set: () => {},
+    });
+    HTMLVideoElement.prototype.requestVideoFrameCallback = (callback) => {
+      state.callback = callback;
+      return 1;
+    };
+    HTMLVideoElement.prototype.cancelVideoFrameCallback = () => {};
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 640;
+        canvas.height = 360;
+        canvas.getContext("2d")!.fillRect(0, 0, 640, 360);
+        return canvas.captureStream(30);
+      },
+    });
+    const OriginalWorker = window.Worker;
+    window.Worker = class extends OriginalWorker {
+      override postMessage(message: unknown) {
+        const request = message as {
+          type: string;
+          id: number;
+          delegate: string;
+          t: number;
+          width: number;
+          height: number;
+          bitmap: ImageBitmap;
+        };
+        if (request.type === "init") {
+          queueMicrotask(() =>
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: {
+                  type: "ready",
+                  id: request.id,
+                  delegate: request.delegate,
+                },
+              }),
+            ),
+          );
+        } else {
+          request.bitmap.close();
+          state.pendingReply = () =>
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: {
+                  type: "result",
+                  id: request.id,
+                  frame: {
+                    t: request.t,
+                    width: request.width,
+                    height: request.height,
+                    landmarks: [],
+                    inferenceMs: 10,
+                  },
+                },
+              }),
+            );
+        }
+      }
+    };
+  });
+  await page.goto(APP_ORIGIN);
+  await page
+    .getByRole("button", { name: "Enable camera", exact: true })
+    .click();
+  const record = page.getByRole("button", {
+    name: "Record round",
+    exact: true,
+  });
+  await expect(record).toBeEnabled();
+  await page.clock.install();
+  await record.click();
+  await page.clock.fastForward(8100);
+  await expect(
+    page.getByRole("button", { name: "Stop & save", exact: true }),
+  ).toBeVisible();
+  await page.clock.fastForward(29_850);
+  await page.evaluate(() => {
+    const state = window as unknown as {
+      mediaMs: number;
+      callback: VideoFrameRequestCallback;
+    };
+    state.mediaMs = 40_040;
+    state.callback(performance.now(), {
+      mediaTime: 40.015,
+    } as VideoFrameCallbackMetadata);
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          !!(window as unknown as { pendingReply?: () => void }).pendingReply,
+      ),
+    )
+    .toBe(true);
+  // The frame is captured before closing, but its result arrives after the
+  // wall-clock duration has frozen. Its media time must still fit the export.
+  await page.clock.fastForward(200);
+  await page.evaluate(() =>
+    (window as unknown as { pendingReply: () => void }).pendingReply(),
+  );
+  await expect(
+    page.getByRole("heading", { name: "Review", exact: true }),
+  ).toBeVisible();
+  const saved = await readExport(page);
+  expect(saved.frames).toHaveLength(1);
+  expect(saved.frames[0].t).toBeCloseTo(30_015);
+  expect(saved.durationMs).toBeGreaterThanOrEqual(saved.frames[0].t);
+  expect(saved.durationMs).toBeLessThan(30_200);
+});

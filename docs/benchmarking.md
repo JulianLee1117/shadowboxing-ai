@@ -50,7 +50,7 @@ The initial app only detects experimental jab/cross events. The correct first re
 
 ## Optional RTMPose / RTMW extraction
 
-`ml/extract.py` is an optional saved-video adapter targeting **rtmlib 0.0.16**, with pinned dependencies in `ml/requirements-extract.txt`. Its mapping, manifest validation and CLI were tested; actual RTM inference on this Mac and real boxing footage has **not yet been verified**. It requests ONNX Runtime CPU only and makes no MPS/Core ML/browser/real-time claim. The [official rtmlib API](https://github.com/Tau-J/rtmlib) supports explicit detector/pose paths and MMPose ordering with `to_openpose=False`.
+`ml/extract.py` is an optional saved-video adapter targeting **rtmlib 0.0.16**, with pinned dependencies in `ml/requirements-extract.txt`. RTMPose-M and RTMW-L inference have now run locally on the target Mac against development footage. These experiments did not justify replacing the live model. The adapter requests and verifies ONNX Runtime CPU only and makes no MPS/Core ML/browser/real-time claim. The [official rtmlib API](https://github.com/Tau-J/rtmlib) supports explicit detector/pose paths and MMPose ordering with `to_openpose=False`.
 
 Create a separate environment when running that experiment:
 
@@ -63,6 +63,8 @@ python3 -m venv .venv
 ```
 
 Use `ml/models.example.json` as the manifest format. Download the chosen model artifacts from the recorded official URLs, inspect their terms, extract the ONNX files locally, and set each `path` relative to the manifest file. The example records a YOLOX-m detector and RTMPose-m body model. Input sizes are `[width,height]`. The script **does not download weights or silently select default models**. It records original source URLs, local paths, file SHA-256, input sizes, package versions, platform and input-video SHA-256. An optional `expectedSha256` is enforced. A newly computed local hash is provenance, not independent proof of artifact authenticity.
+
+Set `pose.inputColorOrder` from the chosen model's exported preprocessing contract. The example uses `RGB`, matching its archive's `pipeline.json` `Normalize.to_rgb=true`. In the pinned rtmlib version, the adapter explicitly reorders the pose input; the detector continues to receive BGR. Omission retains upstream BGR behavior and is recorded, rather than silently changing an old experiment. Verify every new model's contract separately.
 
 For RTMW, set `family` to `rtmw-wholebody`, select a verified 133-point COCO-WholeBody model and its correct input size from the official model zoo, and use its source URL. The extractor rejects a point-count mismatch. It abstains if detection yields zero or multiple people rather than silently changing identity. Mirrors and background people may therefore reduce coverage; inspect the person-count diagnostics.
 
@@ -80,6 +82,34 @@ Mapping is deliberately conservative:
 
 All other MediaPipe slots have zero confidence. No eyes, ears, fingers, heels or foot-index landmarks are approximated. No `z` or world coordinates are fabricated. RTM keypoint scores occupy the compatible `visibility` field but are explicitly identified as RTM confidence, **not calibrated MediaPipe visibility**; a common threshold is a protocol choice, not cross-model calibration. Coordinates are divided by their respective image width and height, and anatomical sides are never mirrored. COCO-WholeBody ordering is defined by [MMPose's dataset metadata](https://github.com/open-mmlab/mmpose/blob/main/configs/_base_/datasets/coco_wholebody.py).
 
-The adapter writes `artifactType: "research-pose-series"` with the same `PoseFrame` layout, not a browser `Session`: the current browser model union does not identify RTM models, and the extractor does not recognize punches. Do not rename it to MediaPipe `full` or submit an empty prediction list as a model accuracy benchmark. Compare pose coverage/timing first; an explicit motion-engine replay integration is needed to compare event detection fairly.
+The adapter writes `artifactType: "research-pose-series"` with the same `PoseFrame` layout, not a browser `Session`: the current browser model union does not identify RTM models, and the extractor does not recognize punches. Do not rename it to MediaPipe `full` or submit an empty prediction list as a model accuracy benchmark. Native keypoints are also retained separately in their original COCO order. Use the replay integration below to compare downstream events while retaining the actual model identity.
 
 Default timestamps come from OpenCV's video position in milliseconds, normalized to the first decoded frame. Non-increasing/unavailable timestamps fail clearly. Only for a verified constant-frame-rate source may `--assume-cfr` use frame index / reported FPS; this assumption is recorded. `--max-frames 30` provides a bounded smoke test and marks the output truncated. Pose timings include detector plus pose and first-call warm-up, and exclude decoding; the final frame duration is estimated and labeled as such. A meaningful performance test needs a complete representative clip and separate warm-up accounting.
+
+For paired model comparisons, `--frames-manifest /path/frames.json` reads exactly the ordered local decoded images supplied to every model. Format: `{"frames":[{"file":"000001.jpg","ptsMs":0},{"file":"000002.jpg","ptsMs":33.367}]}`. Files must exist inside the manifest directory and timestamps must strictly increase. Their hashes and the manifest hash are retained. The required video argument remains source provenance; verify that the decoded images came from that video. Decoding, JPEG encoding, initialization and tracker history can materially change poses, so compare challengers against a fresh baseline on **the same image sequence**, not against live-capture landmarks.
+
+## Replay and compare current counting rules
+
+For the routine development loop, independently label complete sessions once, then run:
+
+```bash
+npm run benchmark -- data/pilot/day1-labeled.json data/pilot/day2-labeled.json \
+  --output-dir data/pilot/runs/unique-experiment
+```
+
+This command preserves all inputs, refuses an existing output directory, replays the current production TypeScript detector, and evaluates saved and new detections with identical labels and matching rules. `comparison.json` reports matches, misses, unmatched predictions, and exactly which reference actions were recovered or lost. Each derived replay records input and detector SHA-256 fingerprints. An edit during a multi-session run causes failure rather than mixing detector versions. Complete annotation flags are required; synthetic sessions are rejected. A failed run may leave partial diagnostic files, but only a successful run writes `comparison.json`. Saved sessions may use different detector versions: for a controlled version-to-version comparison, supply derived sessions from one previously frozen version.
+
+For one session or a replacement pose model:
+
+```bash
+npm run replay -- data/pilot/session-labeled.json --output data/pilot/current-rules.json
+npm run replay -- data/pilot/session-labeled.json \
+  --poses data/pilot/rtm-poses.json --model rtmpose-m-rgb-cpu \
+  --video data/pilot/original.webm --pose-offset-ms=0 \
+  --output data/pilot/rtm-events.json
+python3 -m ml.evaluate data/pilot/rtm-events.json --output data/pilot/rtm-report.json
+```
+
+Replacement replay requires an explicit research model identifier, complete pose-series flag, model and timestamp provenance, and a video whose SHA matches the extraction source. The operator must still verify the labeled session belongs to that video. Offset maps pose timestamps onto the session clock (`sessionTime = poseTime + offset`); supply it explicitly for sessions with a nonzero video origin. No interpolation or missing peak reconstruction occurs. The result is a separate `detector-benchmark-session`, accepted by the evaluator only with its required provenance. Unknown offline capture skips remain null. Browser model identities cannot be reused for challenger models.
+
+These are development comparisons. Replaying tuned recordings cannot establish held-out recognition accuracy, calibrated confidence, sustained live performance or correct form advice. Keep all footage, labels and experiment outputs under ignored `data/pilot/`.

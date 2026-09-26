@@ -15,7 +15,10 @@
     "test:e2e": "playwright test",
     "format:check": "prettier --check src tests scripts package.json tsconfig.json vite.config.ts playwright.config.ts index.html .github/workflows/check.yml model-manifest.json",
     "models:setup": "node scripts/setup-models.mjs",
-    "check": "npm run format:check && npm run test && npm run build"
+    "check": "npm run format:check && npm run test && npm run test:tools && npm run build",
+    "replay": "node scripts/replay-session.mjs",
+    "benchmark": "node scripts/benchmark.mjs",
+    "test:tools": "node --test scripts/*.test.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",

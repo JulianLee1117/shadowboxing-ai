@@ -21,6 +21,30 @@ def metrics(s):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_research_model_requires_explicit_fingerprinted_benchmark(self):
+        s = session()
+        s["model"] = "rtmpose-m-offline"
+        with self.assertRaisesRegex(ValueError, "Session model"):
+            evaluate_session(s)
+        s["artifactType"] = "detector-benchmark-session"
+        s["modelManifest"] = {"family": "rtmpose-body", "pose": {"sha256": "a" * 64}}
+        s["benchmark"] = {"modelId": s["model"], "inputSessionSha256": "b" * 64,
+                          "detectorSourceSha256": "c" * 64, "trackingSource": "replacement-pose-series",
+                          "sourceVideoSha256": "d" * 64, "poseSeriesSha256": "e" * 64,
+                          "timestampMode": "decoded-pts"}
+        result = evaluate_session(s)
+        self.assertEqual(result["model"], "rtmpose-m-offline")
+        self.assertEqual(result["benchmark"], s["benchmark"])
+        self.assertIsNone(result["eventMetrics"])
+        for missing in ("sourceVideoSha256", "poseSeriesSha256", "detectorSourceSha256"):
+            broken = copy.deepcopy(s)
+            del broken["benchmark"][missing]
+            with self.assertRaises(ValueError):
+                evaluate_session(broken)
+        s["benchmark"]["trackingSource"] = "saved-frames"
+        with self.assertRaisesRegex(ValueError, "retain the browser model"):
+            evaluate_session(s)
+
     def test_duplicate_predictions_are_not_both_true_positives(self):
         s = session()
         s["annotations"] = [event("a1")]

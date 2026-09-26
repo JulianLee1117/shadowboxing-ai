@@ -6,6 +6,7 @@ import {
   assessQuality,
   imageDistance,
   MOTION_LIMITS,
+  robustOutboundPath,
   MotionEngine,
 } from "./motion";
 import { JOINT, type PoseFrame, type PunchEvent } from "./types";
@@ -605,4 +606,287 @@ describe("conservative causal event detection", () => {
     expect(changed.quality.label).toBe("Camera framing changed");
     expect(collect(detector, cycle().slice(13))).toEqual([]);
   });
+});
+
+describe("time-based observed trough acquisition", () => {
+  function movingFrames(
+    fps: number,
+    points: [number, number][] = [
+      [0, 0.4],
+      [100, 0.1],
+      [400, 1],
+      [500, 1],
+      [800, 0],
+      [1000, 0],
+    ],
+  ): PoseFrame[] {
+    return Array.from(
+      { length: Math.floor((points.at(-1)![0] * fps) / 1000) + 1 },
+      (_, i) => {
+        const t = (i * 1000) / fps;
+        const next = points.findIndex(([time]) => time > t);
+        if (next < 0) return frame(t, points.at(-1)![1]);
+        const [fromT, from] = points[next - 1];
+        const [toT, to] = points[next];
+        return frame(t, lerp(from, to, (t - fromT) / (toT - fromT)));
+      },
+    );
+  }
+
+  it.each([15, 30, 60])(
+    "recognizes one supported moving-start cycle without a stationary guard at %i fps",
+    (fps) => {
+      const frames = movingFrames(fps);
+      const events = collect(engine(), frames);
+      expect(events).toHaveLength(1);
+      const originReach = Math.min(
+        ...frames
+          .filter((f) => f.t <= 150)
+          .map((f) => armGeometry(f, "left").reach),
+      );
+      const peakReach = Math.max(
+        ...frames.map((f) => armGeometry(f, "left").reach),
+      );
+      expect(events[0].extension).toBeCloseTo(peakReach - originReach);
+      expect(events[0]).toMatchObject({
+        hand: "left",
+        guardReturn: "returned",
+      });
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "refreshes an acquired reference only to a deeper observed flexed trough at %i fps",
+    (fps) => {
+      const frames = movingFrames(fps, [
+        [0, 0.3],
+        [200, 0.3],
+        [800 / 3, 0.25],
+        [400, 0.1],
+        [2000 / 3, 1],
+        [800, 1],
+        [1100, 0],
+        [1200, 0],
+      ]);
+      const events = collect(engine(), frames);
+      expect(events).toHaveLength(1);
+      expect(events[0].extension).toBeCloseTo(
+        armGeometry(frame(0, 1), "left").reach -
+          armGeometry(frame(0, 0.1), "left").reach,
+      );
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "does not turn trough jitter, a held reach, or a brief spike into cycles at %i fps",
+    (fps) => {
+      for (const points of [
+        [
+          [0, 0.4],
+          [100, 0.1],
+          [200, 0.3],
+          [300, 0.1],
+          [400, 0.3],
+          [600, 0],
+        ],
+        [
+          [0, 0.4],
+          [100, 0.1],
+          [400, 1],
+          [1500, 1],
+        ],
+        [
+          [0, 0.4],
+          [100, 0.1],
+          [350, 0.3],
+          [400, 1],
+          [410, 0.1],
+          [1000, 0],
+        ],
+      ] as [number, number][][]) {
+        expect(collect(engine(), movingFrames(fps, points))).toEqual([]);
+      }
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "never joins trough evidence across active-arm occlusion or a timing reset at %i fps",
+    (fps) => {
+      for (const interruption of [
+        "hidden",
+        "gap",
+        "duplicate-time",
+        "reset",
+      ] as const) {
+        const frames = movingFrames(fps);
+        const troughIndex = frames.findIndex((f) => f.t >= 100);
+        if (interruption === "hidden")
+          frames[troughIndex].landmarks[JOINT.leftWrist].visibility = 0.2;
+        if (interruption === "gap")
+          for (let i = troughIndex; i < frames.length; i++) frames[i].t += 250;
+        if (interruption === "duplicate-time")
+          frames[troughIndex].t = frames[troughIndex - 1].t;
+        const detector = engine();
+        const events = frames.flatMap((f, i) => {
+          if (interruption === "reset" && i === troughIndex) detector.reset();
+          return detector.update(f).events;
+        });
+        expect(events, interruption).toEqual([]);
+      }
+    },
+  );
+
+  it("expires old moving-acquisition samples even when individual frame gaps remain valid", () => {
+    const values: [number, number][] = [
+      [0, 0.4],
+      [180, 0.1],
+      [360, 0.3],
+      [400, 0.45],
+      [440, 0.6],
+      [480, 0.75],
+      [520, 0.9],
+      [560, 1],
+      [600, 1],
+      [640, 0.8],
+      [680, 0.6],
+      [720, 0.4],
+      [760, 0.2],
+      [800, 0],
+      [840, 0],
+      [880, 0],
+    ];
+    expect(
+      collect(
+        engine(),
+        values.map(([t, x]) => frame(t, x)),
+      ),
+    ).toEqual([]);
+  });
+
+  it("requires elapsed observation time even when three points have arrived", () => {
+    const frames = [frame(0, 0.4), frame(10, 0.1), frame(20, 0.3)];
+    const detector = engine();
+    expect(collect(detector, frames)).toEqual([]);
+    // A spike immediately afterward must not turn that short window into a cycle.
+    expect(
+      collect(detector, [
+        frame(30, 1),
+        frame(40, 0),
+        frame(50, 0),
+        frame(60, 0),
+      ]),
+    ).toEqual([]);
+  });
+});
+
+const sample = (t: number, x: number, y = 0, angle = 170) => ({
+  t,
+  wrist: { x, y },
+  reach: Math.hypot(x, y),
+  angle,
+});
+const origin = sample(0, 0, 0, 45);
+function measure(points: ReturnType<typeof sample>[]) {
+  return robustOutboundPath(points, origin, points.at(-1)!.t);
+}
+describe("outbound path measurement with an isolated detour", () => {
+  it("preserves coherent observed straight paths", () => {
+    const r = measure([
+      origin,
+      sample(33, 0.2),
+      sample(66, 0.4),
+      sample(99, 0.6),
+      sample(132, 0.8),
+    ]);
+    expect(r.removed).toEqual([]);
+    expect(r.path).toBeCloseTo(0.8);
+  });
+  it("removes one reverse detour with multiple independent strict peak observations", () => {
+    const r = measure([
+      origin,
+      sample(33, 0.5),
+      sample(66, 0.52, 0.8),
+      sample(99, 0.55),
+      sample(132, 0.8),
+    ]);
+    expect(r.removed).toEqual([66]);
+    expect(r.path).toBeCloseTo(0.8);
+  });
+  it("does not remove a lone spike to manufacture supported peak evidence", () => {
+    const r = measure([
+      origin,
+      sample(33, 0.1),
+      sample(66, 0.12, 0.8),
+      sample(99, 0.15),
+      sample(132, 0.2),
+    ]);
+    expect(r.removed).toEqual([]);
+  });
+  it("does not alter a selected observed peak", () => {
+    const r = measure([
+      origin,
+      sample(33, 0.5),
+      sample(66, 0.6),
+      sample(99, 0.62, 0.8),
+    ]);
+    expect(r.removed).toEqual([]);
+  });
+  it("does not smooth a sustained curved path", () => {
+    const r = measure([
+      origin,
+      sample(33, 0.2, 0.2),
+      sample(66, 0.4, 0.4),
+      sample(99, 0.6, 0.3),
+      sample(132, 0.8),
+    ]);
+    expect(r.removed).toEqual([]);
+    expect(r.path).toBeGreaterThan(0.8);
+  });
+  it("does not join a confidence/time gap", () => {
+    const r = measure([
+      origin,
+      sample(33, 0.5),
+      sample(166, 0.52, 0.8),
+      sample(199, 0.55),
+      sample(232, 0.8),
+    ]);
+    expect(r.removed).toEqual([]);
+  });
+  it("rejects repeated zigzags rather than cleaning all evidence", () => {
+    const r = measure([
+      origin,
+      sample(33, 0.5),
+      sample(66, 0.52, 0.8),
+      sample(99, 0.55),
+      sample(132, 0.6),
+      sample(165, 0.62, 0.8),
+      sample(198, 0.65),
+      sample(231, 0.8),
+    ]);
+    expect(r.removed).toEqual([]);
+  });
+  it("leaves sharp but non-reversing physical direction changes measured", () => {
+    const r = measure([
+      origin,
+      sample(33, 0.5),
+      sample(66, 0.52, 0.4),
+      sample(99, 0.9, 0.8),
+      sample(132, 1.3, 0.8),
+    ]);
+    expect(r.removed).toEqual([]);
+  });
+});
+
+it("does not remove a sustained two-sample detour or mutate the observed path", () => {
+  const points = [
+    origin,
+    sample(33, 0.5),
+    sample(66, 0.52, 0.8),
+    sample(99, 0.54, 0.8),
+    sample(132, 0.55),
+    sample(165, 0.8),
+  ];
+  const original = structuredClone(points);
+  expect(measure(points).removed).toEqual([]);
+  expect(points).toEqual(original);
 });

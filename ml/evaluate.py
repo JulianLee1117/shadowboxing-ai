@@ -130,7 +130,30 @@ def validate_session(session: Any, allow_synthetic: bool = False) -> dict:
         raise ValueError("Session id must be a nonempty string")
     if session.get("source") not in ("camera", "file", "demo"):
         raise ValueError("Session source must be camera, file, or demo")
-    if session.get("model") not in ("lite", "full", "heavy", "synthetic"):
+    benchmark = session.get("artifactType") == "detector-benchmark-session"
+    if benchmark:
+        provenance = session.get("benchmark")
+        if not isinstance(provenance, dict) or provenance.get("modelId") != session.get("model"):
+            raise ValueError("Benchmark model identity must match its provenance")
+        if not isinstance(session.get("model"), str) or not session["model"].strip():
+            raise ValueError("Benchmark model identifier must be nonempty")
+        def valid_hash(value):
+            return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+        for key in ("inputSessionSha256", "detectorSourceSha256"):
+            if not valid_hash(provenance.get(key)):
+                raise ValueError(f"Benchmark requires {key}")
+        tracking_source = provenance.get("trackingSource")
+        if tracking_source not in ("saved-frames", "replacement-pose-series"):
+            raise ValueError("Benchmark tracking source is required")
+        if tracking_source == "replacement-pose-series":
+            for key in ("sourceVideoSha256", "poseSeriesSha256"):
+                if not valid_hash(provenance.get(key)):
+                    raise ValueError(f"Replacement poses require {key}")
+            if not session.get("modelManifest") or not provenance.get("timestampMode"):
+                raise ValueError("Replacement pose model and timestamp provenance are required")
+        elif session.get("model") not in ("lite", "full", "heavy", "synthetic"):
+            raise ValueError("Saved-frame replay must retain the browser model identity")
+    elif session.get("model") not in ("lite", "full", "heavy", "synthetic"):
         raise ValueError("Session model must match schema 1.0: lite, full, heavy, or synthetic")
     synthetic = session.get("source") == "demo" or session.get("model") == "synthetic"
     if synthetic and not allow_synthetic:
@@ -213,6 +236,7 @@ def evaluate_session(session: dict, *, annotations_complete: bool = False,
     median_gap = statistics.median(positive_gaps) if positive_gaps else None
     result = {"sessionId": session["id"], "source": session["source"], "model": session.get("model"),
               "modelManifest": session.get("modelManifest"), "stance": session.get("stance"),
+              "benchmark": session.get("benchmark"),
               "drill": session.get("drill"), "recordedAt": session.get("createdAt"),
               "durationMs": session["durationMs"],
               "synthetic": session["source"] == "demo" or session.get("model") == "synthetic",

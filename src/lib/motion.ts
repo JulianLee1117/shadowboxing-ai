@@ -13,7 +13,7 @@ type Hand = PunchEvent["hand"];
 type Point = { x: number; y: number };
 
 /** Include in saved evidence so replays can identify the counting rules used. */
-export const DETECTOR_VERSION = "projected-straight-v3-causal-cycles";
+export const DETECTOR_VERSION = "projected-straight-v4-observed-cycles";
 
 export interface ArmTrackingState {
   hand: Hand;
@@ -32,6 +32,10 @@ export const MOTION_LIMITS = {
   maximumFrameGapMs: 200,
   minimumRestMs: 60,
   minimumRestFrames: 3,
+  maximumAcquisitionWindowMs: 200,
+  maximumAcquisitionSamples: 32,
+  minimumTroughReachChange: 0.06,
+  minimumTroughAngleChange: 6,
   minimumExtension: 0.45,
   minimumPeakAngle: 145,
   minimumPeakSupportFraction: 0.8,
@@ -268,6 +272,56 @@ export function armGeometry(frame: PoseFrame, hand: Hand): ArmSample {
   };
 }
 
+/** Measure the outward path with at most one isolated reversing detour omitted.
+ * Does not alter landmarks, peak time, peak reach/angle, or guard evidence.
+ * A selected peak can never be removed. At least two OTHER strict observed
+ * peaks must remain. This is path robustness, not a pose correction.
+ */
+export function robustOutboundPath(
+  samples: ArmSample[],
+  origin: ArmSample,
+  peakMs: number,
+): { path: number; removed: number[] } {
+  const outgoing = samples.filter((s) => s.t <= peakMs);
+  const raw = outgoing
+    .slice(1)
+    .reduce((sum, s, i) => sum + distance(outgoing[i].wrist, s.wrist), 0);
+  const suspects: number[] = [];
+  for (let i = 1; i < outgoing.length - 1; i++) {
+    const [a, b, c] = [outgoing[i - 1], outgoing[i], outgoing[i + 1]];
+    if (b.t === peakMs || b.t - a.t > 70 || c.t - b.t > 70) continue;
+    const first = distance(a.wrist, b.wrist),
+      second = distance(b.wrist, c.wrist);
+    const bypass = distance(a.wrist, c.wrist);
+    const dot =
+      (b.wrist.x - a.wrist.x) * (c.wrist.x - b.wrist.x) +
+      (b.wrist.y - a.wrist.y) * (c.wrist.y - b.wrist.y);
+    if (
+      first > 0.3 &&
+      second > 0.3 &&
+      dot / (first * second) < -0.85 &&
+      bypass < Math.min(first, second) * 0.35
+    )
+      suspects.push(i);
+  }
+  if (suspects.length !== 1) return { path: raw, removed: [] };
+  const remove = suspects[0];
+  const retained = outgoing.filter((_, i) => i !== remove);
+  const strict = retained.filter(
+    (s) =>
+      s.t !== origin.t &&
+      s.reach - origin.reach >= MOTION_LIMITS.minimumExtension &&
+      s.angle >= MOTION_LIMITS.minimumPeakAngle,
+  );
+  if (strict.length < 2) return { path: raw, removed: [] };
+  return {
+    path: retained
+      .slice(1)
+      .reduce((sum, s, i) => sum + distance(retained[i].wrist, s.wrist), 0),
+    removed: [outgoing[remove].t],
+  };
+}
+
 interface Candidate {
   origin: ArmSample;
   startMs: number;
@@ -278,6 +332,7 @@ interface Candidate {
   peakFrames: number;
   pathLength: number;
   pathToPeak: number;
+  pathSamples: ArmSample[];
   pendingPeak: { before: ArmSample; peak: ArmSample } | null;
   supportedPeak: boolean;
   recovering: boolean;
@@ -287,21 +342,63 @@ interface Candidate {
 
 interface ArmState {
   previous: ArmSample | null;
+  acquisitionSamples: ArmSample[];
   rest: ArmSample | null;
   restStartMs: number;
   restFrames: number;
-  readyFromRecovery: boolean;
+  readyFromMotion: boolean;
   candidate: Candidate | null;
 }
 
 const freshArm = (): ArmState => ({
   previous: null,
+  acquisitionSamples: [],
   rest: null,
   restStartMs: 0,
   restFrames: 0,
-  readyFromRecovery: false,
+  readyFromMotion: false,
   candidate: null,
 });
+
+/** A flexed reversal observed over time, with no inferred or interpolated samples. */
+function observedTrough(samples: ArmSample[]): ArmSample | null {
+  const current = samples.at(-1);
+  if (!current || samples.length < 3) return null;
+  // Search newest first. Both sides must move coherently away from an observed
+  // minimum; elapsed-time support avoids a three-frame assumption at high fps.
+  for (let troughIndex = samples.length - 2; troughIndex > 0; troughIndex--) {
+    const trough = samples[troughIndex];
+    if (
+      trough.angle > 130 ||
+      current.reach - trough.reach < MOTION_LIMITS.minimumTroughReachChange ||
+      current.angle - trough.angle < MOTION_LIMITS.minimumTroughAngleChange
+    )
+      continue;
+    let outgoing = true;
+    for (let i = troughIndex + 1; i < samples.length; i++) {
+      if (
+        samples[i].reach < samples[i - 1].reach ||
+        samples[i].angle < samples[i - 1].angle
+      ) {
+        outgoing = false;
+        break;
+      }
+    }
+    if (!outgoing) continue;
+    for (let i = troughIndex - 1; i >= 0; i--) {
+      const before = samples[i];
+      const next = samples[i + 1];
+      if (before.reach < next.reach || before.angle < next.angle) break;
+      if (
+        current.t - before.t >= MOTION_LIMITS.minimumRestMs &&
+        before.reach - trough.reach >= MOTION_LIMITS.minimumTroughReachChange &&
+        before.angle - trough.angle >= MOTION_LIMITS.minimumTroughAngleChange
+      )
+        return trough;
+    }
+  }
+  return null;
+}
 
 /**
  * Causal extension/recovery heuristic for a supported projected straight-like motion.
@@ -405,13 +502,44 @@ export class MotionEngine {
     const state = this.arms[hand];
     const previous = state.previous;
     state.previous = sample;
-    if (!previous || !Number.isFinite(sample.angle)) return null;
+    if (!Number.isFinite(sample.angle)) {
+      this.arms[hand] = freshArm();
+      return null;
+    }
+    if (!state.candidate) {
+      state.acquisitionSamples = [...state.acquisitionSamples, sample]
+        .filter(
+          (value) =>
+            sample.t - value.t <= MOTION_LIMITS.maximumAcquisitionWindowMs,
+        )
+        .slice(-MOTION_LIMITS.maximumAcquisitionSamples);
+    }
+    if (!previous) return null;
 
     const candidate = state.candidate;
     if (!candidate) {
+      const hadReadyReference =
+        state.rest &&
+        (state.readyFromMotion ||
+          (state.restFrames >= MOTION_LIMITS.minimumRestFrames &&
+            previous.t - state.restStartMs >= MOTION_LIMITS.minimumRestMs));
+      const trough = observedTrough(state.acquisitionSamples);
+      if (
+        trough &&
+        (!hadReadyReference ||
+          (trough.reach < state.rest!.reach &&
+            trough.angle <= state.rest!.angle))
+      ) {
+        // A moving arm may acquire an origin at an observed flexed reversal.
+        // An existing origin can only move farther inward, never follow extension.
+        state.rest = trough;
+        state.restStartMs = trough.t;
+        state.restFrames = 1;
+        state.readyFromMotion = true;
+      }
       const ready =
         state.rest &&
-        (state.readyFromRecovery ||
+        (state.readyFromMotion ||
           (state.restFrames >= MOTION_LIMITS.minimumRestFrames &&
             previous.t - state.restStartMs >= MOTION_LIMITS.minimumRestMs));
       if (
@@ -430,25 +558,27 @@ export class MotionEngine {
           peakFrames: 0,
           pathLength: distance(state.rest!.wrist, sample.wrist),
           pathToPeak: distance(state.rest!.wrist, sample.wrist),
+          pathSamples: [state.rest!, sample],
           pendingPeak: null,
           supportedPeak: false,
           recovering: false,
           recoveryStartMs: null,
           recoveryFrames: 0,
         };
+        state.acquisitionSamples = [];
         this.observePeak(state.candidate, sample, previous);
         return null;
       }
-      // Maintain the acquired or confirmed-return reference in flexion. An
+      // Maintain a reference acquired from rest, reversal, or confirmed return. An
       // extended hand cannot rearm, and outgoing motion must not drag the origin.
       if (ready) {
         if (
-          state.readyFromRecovery &&
+          state.readyFromMotion &&
           sample.angle <= 130 &&
           sample.reach < state.rest!.reach &&
           sample.angle <= state.rest!.angle
         ) {
-          // Confirmation can occur before the hand has finished returning.
+          // Motion-based acquisition can precede the end of inward travel.
           // Follow only observed inward motion with continued elbow flexion;
           // freezing an early return would understate the next excursion.
           state.rest = sample;
@@ -464,7 +594,7 @@ export class MotionEngine {
         } else if (sample.t - state.rest!.t > 350) {
           state.rest = null;
           state.restFrames = 0;
-          state.readyFromRecovery = false;
+          state.readyFromMotion = false;
         }
         return null;
       }
@@ -480,7 +610,7 @@ export class MotionEngine {
       } else {
         state.rest = null;
         state.restFrames = 0;
-        state.readyFromRecovery = false;
+        state.readyFromMotion = false;
       }
       return null;
     }
@@ -491,6 +621,7 @@ export class MotionEngine {
     }
     if (!candidate.recovering) {
       candidate.pathLength += distance(sample.wrist, previous.wrist);
+      candidate.pathSamples.push(sample);
       this.observePeak(candidate, sample, previous);
       if (
         candidate.peakReach - sample.reach > 0.14 &&
@@ -504,7 +635,12 @@ export class MotionEngine {
         // Compare the outward path with its outward chord. Including return
         // travel here penalizes a straight punch simply for retracting quickly.
         // Projected linearity is still not proof of punch type.
-        if (chord < 0.35 || candidate.pathToPeak / chord > 1.65) {
+        const measuredPath = robustOutboundPath(
+          candidate.pathSamples,
+          candidate.origin,
+          candidate.peakMs,
+        );
+        if (chord < 0.35 || measuredPath.path / chord > 1.65) {
           this.arms[hand] = freshArm();
           return null;
         }
@@ -574,7 +710,7 @@ export class MotionEngine {
             rest: sample,
             restStartMs: sample.t,
             restFrames: 1,
-            readyFromRecovery: true,
+            readyFromMotion: true,
           }
         : freshArm();
     return event;

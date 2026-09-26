@@ -9,6 +9,7 @@
   "pose": {
     "path": "../models/rtmpose-m.onnx",
     "sourceUrl": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip",
-    "inputSize": [192, 256]
+    "inputSize": [192, 256],
+    "inputColorOrder": "RGB"
   }
 }
