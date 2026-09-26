@@ -12,7 +12,7 @@ import { VisionRunner } from "../lib/vision";
 import { MotionEngine, assessQuality } from "../lib/motion";
 import { demoFrame } from "../lib/demo";
 import { percentile } from "../lib/storage";
-import modelManifest from "../../public/models/manifest.json";
+import modelManifest from "../../model-manifest.json";
 
 const EMPTY_QUALITY: QualityState = {
   assessable: false,

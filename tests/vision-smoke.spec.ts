@@ -48,46 +48,7 @@ test.describe("actual local MediaPipe runtime", () => {
   }) => {
     const requests: string[] = [];
     page.on("request", (request) => requests.push(request.url()));
-    await page.addInitScript(() => {
-      const OriginalWorker = window.Worker;
-      const diagnosticWindow = window as Window & {
-        forcedGpuFailures?: number;
-      };
-      diagnosticWindow.forcedGpuFailures = 0;
-      window.Worker = class extends OriginalWorker {
-        override postMessage(
-          message: unknown,
-          transferOrOptions?: Transferable[] | StructuredSerializeOptions,
-        ): void {
-          const request = message as {
-            type?: string;
-            delegate?: string;
-            id?: number;
-          };
-          if (request?.type === "init" && request.delegate === "GPU") {
-            diagnosticWindow.forcedGpuFailures =
-              (diagnosticWindow.forcedGpuFailures ?? 0) + 1;
-            // Exercise the runner's failure/restart path. The CPU model itself
-            // still loads real local weights and performs actual inference.
-            queueMicrotask(() =>
-              this.dispatchEvent(
-                new MessageEvent("message", {
-                  data: {
-                    type: "error",
-                    id: request.id,
-                    error: "Injected unavailable GPU for fallback test.",
-                  },
-                }),
-              ),
-            );
-            return;
-          }
-          if (Array.isArray(transferOrOptions))
-            super.postMessage(message, transferOrOptions);
-          else super.postMessage(message, transferOrOptions);
-        }
-      };
-    });
+    await forceCpuFallback(page);
     await page.goto(appUrl);
 
     const result = await detectSyntheticFrames(page);
@@ -110,6 +71,9 @@ test.describe("actual local MediaPipe runtime", () => {
   }) => {
     const requests: string[] = [];
     page.on("request", (request) => requests.push(request.url()));
+    // Use actual CPU inference for repeatable lifecycle coverage on CI hosts
+    // with software GPUs; the first smoke test still covers default selection.
+    await forceCpuFallback(page);
     await page.goto(appUrl);
     const recording = await recordSyntheticVideo(page);
     const original = Buffer.from(recording.bytes);
@@ -156,6 +120,7 @@ test.describe("actual local MediaPipe runtime", () => {
     expect(saved[0].id).not.toBe(saved[1].id);
     for (const session of saved) {
       expect(session.source).toBe("file");
+      expect(session.capture?.delegate).toBe("CPU");
       expect(session.videoBytes).toBe(original.byteLength);
       expect(session.durationMs).toBeGreaterThan(1500);
       expect(session.durationMs).toBeLessThan(4000);
@@ -221,6 +186,49 @@ test.describe("actual local MediaPipe runtime", () => {
     expect(externalRequests(requests)).toEqual([]);
   });
 });
+
+async function forceCpuFallback(page: Page) {
+  await page.addInitScript(() => {
+    const OriginalWorker = window.Worker;
+    const diagnosticWindow = window as Window & {
+      forcedGpuFailures?: number;
+    };
+    diagnosticWindow.forcedGpuFailures = 0;
+    window.Worker = class extends OriginalWorker {
+      override postMessage(
+        message: unknown,
+        transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+      ): void {
+        const request = message as {
+          type?: string;
+          delegate?: string;
+          id?: number;
+        };
+        if (request?.type === "init" && request.delegate === "GPU") {
+          diagnosticWindow.forcedGpuFailures =
+            (diagnosticWindow.forcedGpuFailures ?? 0) + 1;
+          // Exercise the runner's failure/restart path. The CPU model itself
+          // still loads real local weights and performs actual inference.
+          queueMicrotask(() =>
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: {
+                  type: "error",
+                  id: request.id,
+                  error: "Injected unavailable GPU for fallback test.",
+                },
+              }),
+            ),
+          );
+          return;
+        }
+        if (Array.isArray(transferOrOptions))
+          super.postMessage(message, transferOrOptions);
+        else super.postMessage(message, transferOrOptions);
+      }
+    };
+  });
+}
 
 async function detectSyntheticFrames(page: Page) {
   return page.evaluate(async () => {

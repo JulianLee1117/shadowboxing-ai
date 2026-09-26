@@ -29,6 +29,8 @@ Browser tests run the actual Full model and local WASM with generated streams, C
 
 The uploaded-video workflow also passed against the compiled production build and its worker assets, including repeated analysis, nonempty timestamped frames, original-video byte preservation, JSON export and deletion. Desktop and 390px layouts were visually inspected.
 
+The short-clip integration test forces a failed GPU initialization and verifies actual CPU fallback inference, avoiding a software-rendered CI GPU throughput requirement. A separate runtime test exercises normal delegate selection. Neither test is a target-hardware performance benchmark.
+
 The production build is typechecked and dependencies audited. Test captures are synthetic; no physical camera or private recording was used during implementation.
 
 ## Remaining evidence and features

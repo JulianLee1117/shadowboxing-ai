@@ -26,7 +26,7 @@ if (args.some((arg) => arg !== "--all")) {
 const all = args.includes("--all");
 const modelDir = path.join(root, "public", "models");
 const wasmDir = path.join(root, "public", "wasm");
-const manifestPath = path.join(modelDir, "manifest.json");
+const manifestPath = path.join(root, "model-manifest.json");
 
 async function hashFile(file) {
   const hash = createHash("sha256");

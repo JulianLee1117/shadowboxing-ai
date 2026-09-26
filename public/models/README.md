@@ -6,7 +6,7 @@ Pose Landmarker float16 version-1 bundle and copies the pinned
 `public/wasm`. Use `npm run models:setup -- --all` to add Lite and Heavy.
 
 The exact downloaded byte sizes and SHA-256 values are recorded in
-[`manifest.json`](manifest.json). On first download these hashes are established
+[`model-manifest.json`](../../model-manifest.json). On first download these hashes are established
 from Google's HTTPS response, not a vendor signature; subsequent setup runs
 verify the pinned values. Keep the manifest under version control, while `.task`
 weights and `public/wasm/` are generated, ignored assets. Do not put training

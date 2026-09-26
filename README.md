@@ -14,7 +14,7 @@ npm run models:setup -- --all
 npm run dev
 ```
 
-Open [the local studio](http://127.0.0.1:5173). Models and runtime files are downloaded during setup, then served from your device. Setup without `--all` installs Full only. Exact artifact URLs and SHA-256 hashes are recorded in [the model manifest](public/models/manifest.json). Weights and copied WASM files are excluded from Git.
+Open [the local studio](http://127.0.0.1:5173). Models and runtime files are downloaded during setup, then served from your device. Setup without `--all` installs Full only. Exact artifact URLs and SHA-256 hashes are recorded in [the model manifest](model-manifest.json). Weights and copied WASM files are excluded from Git.
 
 Desktop Chromium is the verified browser target. Camera access requires localhost or HTTPS. Safari and mobile-browser inference have not been validated. The responsive interface has been checked at desktop and 390px widths.
 
