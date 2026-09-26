@@ -1,4 +1,5 @@
 import type { PoseFrame } from "../lib/types";
+import { assessArmTracking, MOTION_LIMITS } from "../lib/motion";
 
 const edges = [
   [11, 12],
@@ -26,12 +27,26 @@ export function PoseOverlay({
   silhouette?: boolean;
 }) {
   if (!frame) return null;
+  const tracking = assessArmTracking(frame);
+  const uncertain = (i: number) => {
+    const p = frame.landmarks[i];
+    if ((p?.visibility ?? 0) < MOTION_LIMITS.minimumVisibility) return true;
+    if ([11, 13, 15].includes(i)) return !tracking.left.assessable;
+    if ([12, 14, 16].includes(i)) return !tracking.right.assessable;
+    return false;
+  };
   const point = (i: number) => {
     const p = frame.landmarks[i];
     return p &&
       (p.visibility ?? 0) > 0.5 &&
       Number.isFinite(p.x) &&
-      Number.isFinite(p.y)
+      Number.isFinite(p.y) &&
+      p.x >= 0 &&
+      p.x <= 1 &&
+      p.y >= 0 &&
+      p.y <= 1 &&
+      (p.presence === undefined ||
+        (Number.isFinite(p.presence) && p.presence >= 0.5))
       ? p
       : null;
   };
@@ -65,7 +80,7 @@ export function PoseOverlay({
               y2={q.y * frame.height}
             />
             <line
-              className={`pose-line ${a % 2 ? "lead" : "rear"}`}
+              className={`pose-line ${a % 2 ? "lead" : "rear"} ${uncertain(a) || uncertain(b) ? "uncertain" : ""}`}
               x1={p.x * frame.width}
               y1={p.y * frame.height}
               x2={q.x * frame.width}
@@ -82,7 +97,7 @@ export function PoseOverlay({
             cx={p.x * frame.width}
             cy={p.y * frame.height}
             r={i === 15 || i === 16 ? 9 : 5}
-            className={i % 2 ? "pose-joint lead" : "pose-joint rear"}
+            className={`pose-joint ${i % 2 ? "lead" : "rear"} ${uncertain(i) ? "uncertain" : ""}`}
           />
         ) : null;
       })}
@@ -92,7 +107,7 @@ export function PoseOverlay({
           <text
             key={`label-${i}`}
             transform={`translate(${p.x * frame.width} ${p.y * frame.height - 20}) scale(${mirror ? -1 : 1} 1)`}
-            fill="#eff9e1"
+            fill={uncertain(i) ? "#efbf83" : "#eff9e1"}
             textAnchor="middle"
             fontSize="18"
             fontFamily="monospace"

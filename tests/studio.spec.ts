@@ -25,6 +25,12 @@ async function denyPhysicalCamera(page: Page) {
 }
 
 async function readExport(page: Page): Promise<Session> {
+  const button = page.getByRole("button", {
+    name: "Evidence JSON",
+    exact: true,
+  });
+  if (!(await button.isVisible()))
+    await page.getByText("Export & details", { exact: true }).click();
   const pending = page.waitForEvent("download");
   await page
     .getByRole("button", { name: "Evidence JSON", exact: true })
@@ -40,6 +46,7 @@ test("initial page acquires no camera and makes no external network requests", a
   page,
 }) => {
   await denyPhysicalCamera(page);
+  await page.setViewportSize({ width: 1512, height: 823 });
   const externalRequests: string[] = [];
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
@@ -53,13 +60,15 @@ test("initial page acquires no camera and makes no external network requests", a
     return route.continue();
   });
   await page.goto(APP_ORIGIN);
-  await expect(page.getByRole("heading", { name: "Practice" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Practice", exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Enable camera", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Start round", exact: true }),
-  ).toBeDisabled();
+    page.getByRole("button", { name: "Record round", exact: true }),
+  ).toHaveCount(0);
   await page.waitForLoadState("networkidle");
   expect(
     await page.evaluate(
@@ -69,6 +78,10 @@ test("initial page acquires no camera and makes no external network requests", a
     ),
   ).toBe(0);
   expect(externalRequests).toEqual([]);
+  await page.screenshot({
+    path: "artifacts/ui/practice-desktop.png",
+    fullPage: true,
+  });
 });
 
 test("camera denial is explained and leaves the camera off", async ({
@@ -86,8 +99,8 @@ test("camera denial is explained and leaves the camera off", async ({
     page.getByRole("button", { name: "Enable camera", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Start round", exact: true }),
-  ).toBeDisabled();
+    page.getByRole("button", { name: "Record round", exact: true }),
+  ).toHaveCount(0);
   const requests = await page.evaluate(
     () =>
       (window as unknown as { cameraRequests: MediaStreamConstraints[] })
@@ -97,30 +110,24 @@ test("camera denial is explained and leaves the camera off", async ({
   expect(requests[0].audio).toBe(false);
 });
 
-test("demo round survives immediate navigation, export, reload, annotation edits, and deletion", async ({
+test("demo round opens review, survives export and reload, and permits annotation edits and deletion", async ({
   page,
 }) => {
   await denyPhysicalCamera(page);
-  // Immediate Finish -> Review must preserve the completed round's timestamps.
+  // Automatic Stop & save -> Review must preserve the completed round's timestamps.
   await page.goto(APP_ORIGIN);
-  await page.getByRole("button", { name: "Explore a simulated round" }).click();
-  await page.getByRole("button", { name: "Start round", exact: true }).click();
+  await page.getByText("More options", { exact: true }).click();
+  await page.getByRole("button", { name: "Try demo", exact: true }).click();
+  await page.getByRole("button", { name: "Start demo", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Finish round", exact: true }),
+    page.getByRole("button", { name: "Stop & save", exact: true }),
   ).toBeVisible();
   // Two known synthetic strokes occur during this interval. This is UI coverage,
   // never a real-camera accuracy or performance benchmark.
   await page.waitForTimeout(6200);
-  const candidateCounts = await page
-    .locator(".round-count strong")
-    .allTextContents();
-  expect(
-    candidateCounts.reduce((sum, value) => sum + Number(value), 0),
-  ).toBeGreaterThanOrEqual(1);
-  await page.getByRole("button", { name: "Finish round", exact: true }).click();
-  await page.getByRole("button", { name: /^Round review/ }).click();
+  await page.getByRole("button", { name: "Stop & save", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Evidence JSON", exact: true }),
+    page.getByRole("heading", { name: "Review", exact: true }),
   ).toBeVisible();
   await expect(page.locator(".round-library .session-item")).toHaveCount(1);
 
@@ -147,7 +154,7 @@ test("demo round survives immediate navigation, export, reload, annotation edits
 
   // Reload closes the in-memory instance; the round must really exist in IndexedDB.
   await page.reload();
-  await page.getByRole("button", { name: /^Round review/ }).click();
+  await page.getByRole("button", { name: /^Saved rounds/ }).click();
   await expect(page.locator(".round-library .session-item")).toHaveCount(1);
   await page.locator(".round-library .session-item").click();
   const persisted = await readExport(page);
@@ -190,12 +197,13 @@ test("demo round survives immediate navigation, export, reload, annotation edits
     .click();
   await expect(page.locator(".annotation-row")).toHaveCount(0);
   expect((await readExport(page)).annotations).toEqual([]);
+  page.once("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", { name: "Delete this round", exact: true })
     .click();
   await expect(page.locator(".round-library .session-item")).toHaveCount(0);
   await page.reload();
-  await page.getByRole("button", { name: /^Round review/ }).click();
+  await page.getByRole("button", { name: /^Saved rounds/ }).click();
   await expect(page.locator(".round-library .session-item")).toHaveCount(0);
   expect(
     await page.evaluate(
@@ -281,11 +289,371 @@ test("Stop camera ends a synthetic stream even while pose initialization is pend
   ).toBe(1);
 });
 
+test("camera countdown can be cancelled and records once without visible pose", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    const state = window as unknown as {
+      syntheticCamera: MediaStream | null;
+      cameraRequests: MediaStreamConstraints[];
+      recorderStarts: number[];
+    };
+    state.syntheticCamera = null;
+    state.cameraRequests = [];
+    state.recorderStarts = [];
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async (constraints: MediaStreamConstraints) => {
+        state.cameraRequests.push(constraints);
+        const canvas = document.createElement("canvas");
+        canvas.width = 640;
+        canvas.height = 360;
+        const context = canvas.getContext("2d")!;
+        let value = 0;
+        const draw = () => {
+          // No person or landmark fixture: tracking must remain unassessable.
+          context.fillStyle = value++ % 2 ? "#234" : "#345";
+          context.fillRect(0, 0, canvas.width, canvas.height);
+        };
+        draw();
+        const stream = canvas.captureStream(20);
+        const timer = window.setInterval(draw, 50);
+        stream.getTracks().forEach((track) => {
+          const originalStop = track.stop.bind(track);
+          track.stop = () => {
+            clearInterval(timer);
+            originalStop();
+          };
+        });
+        state.syntheticCamera = stream;
+        return stream;
+      },
+    });
+    const OriginalRecorder = window.MediaRecorder;
+    window.MediaRecorder = class extends OriginalRecorder {
+      override start(timeslice?: number) {
+        state.recorderStarts.push(performance.now());
+        super.start(timeslice);
+      }
+    };
+    // Run actual local CPU inference for predictable blank-frame diagnostics.
+    // The separate runtime smoke test covers ordinary GPU selection.
+    const OriginalWorker = window.Worker;
+    window.Worker = class extends OriginalWorker {
+      override postMessage(
+        message: unknown,
+        transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+      ) {
+        const request = message as {
+          type?: string;
+          delegate?: string;
+          id?: number;
+        };
+        if (request.type === "init" && request.delegate === "GPU") {
+          queueMicrotask(() =>
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: {
+                  type: "error",
+                  id: request.id,
+                  error: "Use actual CPU inference in this lifecycle test.",
+                },
+              }),
+            ),
+          );
+          return;
+        }
+        if (Array.isArray(transferOrOptions))
+          super.postMessage(message, transferOrOptions);
+        else super.postMessage(message, transferOrOptions);
+      }
+    };
+  });
+  await page.goto(APP_ORIGIN);
+  await page
+    .getByRole("button", { name: "Enable camera", exact: true })
+    .click();
+  const record = page.getByRole("button", {
+    name: "Record round",
+    exact: true,
+  });
+  await expect(record).toBeEnabled({ timeout: 45_000 });
+  await expect(page.getByLabel("Arm tracking")).toContainText("L · uncertain");
+  await expect(page.getByLabel("Arm tracking")).toContainText("R · uncertain");
+
+  await record.click();
+  await expect(
+    page.getByText("Step back into position", { exact: true }),
+  ).toBeVisible();
+  await page.waitForTimeout(500);
+  await page
+    .getByRole("button", { name: "Cancel countdown", exact: true })
+    .click();
+  await expect(record).toBeEnabled();
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { recorderStarts: number[] }).recorderStarts,
+    ),
+  ).toEqual([]);
+
+  const clickedAt = await page.evaluate(() => performance.now());
+  await record.click();
+  await expect(page.locator(".countdown-number")).toHaveText("8");
+  await expect(
+    page.getByRole("button", { name: "Stop & save", exact: true }),
+  ).toBeVisible({ timeout: 11_000 });
+  await page.waitForTimeout(1200);
+  const starts = await page.evaluate(
+    () => (window as unknown as { recorderStarts: number[] }).recorderStarts,
+  );
+  expect(starts).toHaveLength(1);
+  expect(starts[0] - clickedAt).toBeGreaterThanOrEqual(7900);
+  expect(starts[0] - clickedAt).toBeLessThan(11_000);
+  await expect(page.getByLabel("Arm tracking")).toContainText("uncertain");
+  await page.getByRole("button", { name: "Stop & save", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Review", exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as { syntheticCamera: MediaStream }
+          ).syntheticCamera.getVideoTracks()[0].readyState,
+      ),
+    )
+    .toBe("ended");
+  await expect(page.locator(".replay-stage video")).toBeVisible();
+  const saved = await readExport(page);
+  expect(saved.source).toBe("camera");
+  expect(saved.durationMs).toBeGreaterThan(1000);
+  expect(saved.events).toEqual([]);
+  const requests = await page.evaluate(
+    () =>
+      (window as unknown as { cameraRequests: MediaStreamConstraints[] })
+        .cameraRequests,
+  );
+  expect(requests).toHaveLength(1);
+  expect(requests[0].audio).toBe(false);
+});
+
+test("concurrent starts and late camera responses cannot replace the latest source", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    const state = window as unknown as {
+      pendingCameras: Array<(stream: MediaStream) => void>;
+      syntheticCameras: MediaStream[];
+      resolveCamera: (index: number) => void;
+    };
+    state.pendingCameras = [];
+    state.syntheticCameras = [];
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: () =>
+        new Promise<MediaStream>((resolve) => {
+          state.pendingCameras.push(resolve);
+        }),
+    });
+    state.resolveCamera = (index) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 360;
+      const context = canvas.getContext("2d")!;
+      let value = 0;
+      const draw = () => {
+        context.fillStyle = value++ % 2 ? "#234" : "#345";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+      };
+      draw();
+      const stream = canvas.captureStream(10);
+      const timer = window.setInterval(draw, 100);
+      stream.getTracks().forEach((track) => {
+        const originalStop = track.stop.bind(track);
+        track.stop = () => {
+          clearInterval(timer);
+          originalStop();
+        };
+      });
+      state.syntheticCameras[index] = stream;
+      state.pendingCameras[index](stream);
+    };
+  });
+  await page.goto(APP_ORIGIN);
+  const enable = page.getByRole("button", {
+    name: "Enable camera",
+    exact: true,
+  });
+  await enable.evaluate((button: HTMLButtonElement) => {
+    // Two invocations before the first start() continuation yields to React.
+    button.click();
+    button.click();
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { pendingCameras: unknown[] }).pendingCameras
+            .length,
+      ),
+    )
+    .toBe(1);
+  await page.getByRole("button", { name: "Stop camera", exact: true }).click();
+  await enable.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { pendingCameras: unknown[] }).pendingCameras
+            .length,
+      ),
+    )
+    .toBe(2);
+
+  // The second source becomes ready while the first permission response is
+  // still unresolved. Resolving the first later must not touch the second.
+  await page.evaluate(() =>
+    (
+      window as unknown as { resolveCamera: (index: number) => void }
+    ).resolveCamera(1),
+  );
+  await expect(
+    page.getByRole("button", { name: "Record round", exact: true }),
+  ).toBeEnabled({ timeout: 45_000 });
+  await page.evaluate(() =>
+    (
+      window as unknown as { resolveCamera: (index: number) => void }
+    ).resolveCamera(0),
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (
+          window as unknown as { syntheticCameras: MediaStream[] }
+        ).syntheticCameras.map(
+          (stream) => stream.getVideoTracks()[0].readyState,
+        ),
+      ),
+    )
+    .toEqual(["ended", "live"]);
+  await expect(
+    page.getByRole("button", { name: "Record round", exact: true }),
+  ).toBeEnabled();
+  expect(
+    await page
+      .locator(".camera-stage video")
+      .evaluate(
+        (video: HTMLVideoElement) =>
+          video.srcObject ===
+          (window as unknown as { syntheticCameras: MediaStream[] })
+            .syntheticCameras[1],
+      ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Stop camera", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (
+          window as unknown as { syntheticCameras: MediaStream[] }
+        ).syntheticCameras.map(
+          (stream) => stream.getVideoTracks()[0].readyState,
+        ),
+      ),
+    )
+    .toEqual(["ended", "ended"]);
+});
+
+test("camera round ends on time when no video frame callbacks arrive", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    const state = window as unknown as { syntheticCamera: MediaStream | null };
+    state.syntheticCamera = null;
+    // Simulate a suspended frame callback stream after setup. Timer completion
+    // must not depend on a successful pose result or another decoded frame.
+    HTMLVideoElement.prototype.requestVideoFrameCallback = () => 1;
+    HTMLVideoElement.prototype.cancelVideoFrameCallback = () => {};
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 640;
+        canvas.height = 360;
+        const context = canvas.getContext("2d")!;
+        let value = 0;
+        const draw = () => {
+          context.fillStyle = value++ % 2 ? "#234" : "#345";
+          context.fillRect(0, 0, canvas.width, canvas.height);
+        };
+        draw();
+        const stream = canvas.captureStream(20);
+        const timer = window.setInterval(draw, 50);
+        stream.getTracks().forEach((track) => {
+          const originalStop = track.stop.bind(track);
+          track.stop = () => {
+            clearInterval(timer);
+            originalStop();
+          };
+        });
+        state.syntheticCamera = stream;
+        return stream;
+      },
+    });
+  });
+  await page.goto(APP_ORIGIN);
+  await page
+    .getByRole("button", { name: "Enable camera", exact: true })
+    .click();
+  const record = page.getByRole("button", {
+    name: "Record round",
+    exact: true,
+  });
+  await expect(record).toBeEnabled({ timeout: 45_000 });
+  await expect(page.getByLabel("Round duration", { exact: true })).toHaveValue(
+    "30",
+  );
+  await page.clock.install();
+  await record.click();
+  await page.clock.fastForward(8100);
+  await expect(
+    page.getByRole("button", { name: "Stop & save", exact: true }),
+  ).toBeVisible();
+  // Allow the real MediaRecorder to produce a media chunk; the app clock is
+  // then advanced independently of pose callbacks and real encoding time.
+  await page.waitForTimeout(300);
+  await page.clock.fastForward(30_100);
+  await expect(
+    page.getByRole("heading", { name: "Review", exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as { syntheticCamera: MediaStream }
+          ).syntheticCamera.getVideoTracks()[0].readyState,
+      ),
+    )
+    .toBe("ended");
+  const saved = await readExport(page);
+  expect(saved.source).toBe("camera");
+  expect(saved.frames).toEqual([]);
+  expect(saved.events).toEqual([]);
+  expect(saved.durationMs).toBeGreaterThanOrEqual(29_900);
+  expect(saved.durationMs).toBeLessThan(31_000);
+});
+
 test("390px mobile layout stays within the viewport", async ({ page }) => {
   await denyPhysicalCamera(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(APP_ORIGIN);
-  await expect(page.getByRole("heading", { name: "Practice" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Practice", exact: true }),
+  ).toBeVisible();
   const overflow = () =>
     page.evaluate(() => ({
       viewport: window.innerWidth,
@@ -295,9 +663,14 @@ test("390px mobile layout stays within the viewport", async ({ page }) => {
   let dimensions = await overflow();
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
   expect(dimensions.body).toBeLessThanOrEqual(dimensions.viewport);
-  await page.getByRole("button", { name: "Explore a simulated round" }).click();
+  await page.screenshot({
+    path: "artifacts/ui/practice-mobile.png",
+    fullPage: true,
+  });
+  await page.getByText("More options", { exact: true }).click();
+  await page.getByRole("button", { name: "Try demo", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Start round", exact: true }),
+    page.getByRole("button", { name: "Start demo", exact: true }),
   ).toBeEnabled();
   dimensions = await overflow();
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
@@ -387,9 +760,14 @@ test("retained-video replay bounds native seeking and hides pose samples across 
     [demoFrame(0), demoFrame(50), demoFrame(600)],
   );
   await page.reload();
-  await page.getByRole("button", { name: /^Round review/ }).click();
+  await page.getByRole("button", { name: /^Saved rounds/ }).click();
   await page.locator(".round-library .session-item").click();
   const video = page.locator(".replay-stage video");
+  const tracking = page
+    .locator(".review")
+    .getByRole("checkbox", { name: "Show tracking", exact: true });
+  await expect(tracking).not.toBeChecked();
+  await tracking.check();
   await expect
     .poll(() =>
       video.evaluate((element: HTMLVideoElement) => element.readyState),

@@ -1,416 +1,227 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Activity,
-  ArrowDownToLine,
-  ArrowRight,
-  Camera,
-  Check,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  Circle,
-  Crosshair,
-  Film,
-  FlaskConical,
-  FolderOpen,
-  Info,
-  Maximize2,
-  Play,
-  Plus,
-  ScanLine,
-  ShieldCheck,
-  SlidersHorizontal,
-  Square,
-  Timer,
-  Trash2,
-  Upload,
-  Volume2,
-  VolumeX,
-  X,
-} from "lucide-react";
+import { Camera, Circle, Square, Upload, X } from "lucide-react";
 import { useStudio } from "./hooks/useStudio";
 import { PoseOverlay } from "./components/PoseOverlay";
-import { demoFrame } from "./lib/demo";
-import {
-  deleteSession,
-  downloadBlob,
-  exportSession,
-  formatTime,
-  listSessions,
-  percentile,
-  saveSession,
-} from "./lib/storage";
-import type {
-  ModelVariant,
-  Session,
-  SessionAnnotation,
-  Stance,
-} from "./lib/types";
-
-const DRILLS = [
-  {
-    id: "jab",
-    title: "Jab",
-    sequence: ["Jab"],
-    tip: "Throw a comfortable lead straight, then settle back into your chosen guard. Leave a little space between repetitions.",
-  },
-  {
-    id: "cross",
-    title: "Cross",
-    sequence: ["Cross"],
-    tip: "Practice a controlled rear straight. Reset between repetitions and keep both hands inside the camera view.",
-  },
-  {
-    id: "one-two",
-    title: "1–2",
-    sequence: ["Jab", "Cross"],
-    tip: "Link a jab and a cross at a comfortable pace. Pause briefly between combinations. The timeline shows what was detected.",
-  },
-  {
-    id: "open",
-    title: "Free practice",
-    sequence: ["Move", "Reset"],
-    tip: "Practice at your own pace. This preview counts jabs and crosses only.",
-  },
-];
-type View = "studio" | "review" | "lab";
+import { RoundReview } from "./components/RoundReview";
+import { assessArmTracking } from "./lib/motion";
+import { ReadinessGate } from "./lib/readiness";
+import { formatTime, listSessions, saveSession } from "./lib/storage";
+import type { ModelVariant, Session, Stance } from "./lib/types";
 
 function App() {
-  const [view, setView] = useState<View>("studio");
-  const [drill, setDrill] = useState("open");
+  const [view, setView] = useState<"practice" | "review">("practice");
   const [stance, setStance] = useState<Stance>("orthodox");
-  const [duration, setDuration] = useState(60);
+  const [duration, setDuration] = useState(30);
   const [model, setModel] = useState<ModelVariant>("full");
-  const [mirror, setMirror] = useState(true);
   const [overlay, setOverlay] = useState(true);
-  const [record, setRecord] = useState(false);
-  const [sound, setSound] = useState(false);
-  const [sideConfirmed, setSideConfirmed] = useState(false);
-  const [calibrated, setCalibrated] = useState(false);
+  const [sound, setSound] = useState(true);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<Session | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [completeId, setCompleteId] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<"saving" | "saved" | "error">(
-    "saved",
-  );
-  const [showPredictions, setShowPredictions] = useState(false);
-  const [reviewTime, setReviewTime] = useState(0);
-  const [reviewVideo, setReviewVideo] = useState<string | null>(null);
-  const [annotationLabel, setAnnotationLabel] =
-    useState<SessionAnnotation["label"]>("jab");
-  const [annotationHand, setAnnotationHand] =
-    useState<SessionAnnotation["hand"]>("left");
-  const [annotationStart, setAnnotationStart] = useState(0);
-  const [annotationEnd, setAnnotationEnd] = useState(1);
-  const [annotationNote, setAnnotationNote] = useState("");
-  const [help, setHelp] = useState(false);
+  const [saveStates, setSaveStates] = useState<
+    Record<string, "saving" | "saved" | "error">
+  >({});
+  const saveRevisions = useRef<Record<string, number>>({});
+  const [finishing, setFinishing] = useState(false);
+  const gate = useRef(new ReadinessGate());
+  const [readiness, setReadiness] = useState(() => gate.current.cancel());
   const uploadRef = useRef<HTMLInputElement>(null);
-  const reviewRef = useRef<HTMLVideoElement>(null);
-  const stageRef = useRef<HTMLDivElement>(null);
-  const activeDrill = DRILLS.find((d) => d.id === drill)!;
-  const replayOffsetMs = selected?.videoOffsetMs ?? 0;
-  const replayDurationMs = selected?.durationMs ?? 0;
-  const syncReviewVideo = useCallback(
-    (video: HTMLVideoElement) => {
-      const start = replayOffsetMs / 1000;
-      const end = (replayOffsetMs + replayDurationMs) / 1000;
-      const bounded = Math.max(start, Math.min(end, video.currentTime));
-      if (video.currentTime >= end) video.pause();
-      if (Math.abs(video.currentTime - bounded) > 0.0001)
-        video.currentTime = bounded;
-      setReviewTime(
-        Math.max(
-          0,
-          Math.min(replayDurationMs, bounded * 1000 - replayOffsetMs),
-        ),
+  const audio = useRef<AudioContext | null>(null);
+  const lastBeep = useRef(-1);
+  const persist = useCallback(async (session: Session) => {
+    const revision = (saveRevisions.current[session.id] ?? 0) + 1;
+    saveRevisions.current[session.id] = revision;
+    setSaveStates((old) => ({ ...old, [session.id]: "saving" }));
+    try {
+      await saveSession(session);
+      if (saveRevisions.current[session.id] === revision)
+        setSaveStates((old) => ({ ...old, [session.id]: "saved" }));
+    } catch (e) {
+      if (saveRevisions.current[session.id] !== revision) return;
+      setSaveStates((old) => ({ ...old, [session.id]: "error" }));
+      setNotice(
+        e instanceof Error
+          ? e.message
+          : "Could not save. Export this round before closing.",
       );
-    },
-    [replayOffsetMs, replayDurationMs],
-  );
-
-  const onComplete = useCallback((session: Session) => {
-    setSessions((old) => [session, ...old.filter((s) => s.id !== session.id)]);
-    setSelected(session);
-    setCompleteId(session.id);
-    setSaveState("saving");
-    void saveSession(session)
-      .then(() => setSaveState("saved"))
-      .catch((e) => {
-        setSaveState("error");
-        setNotice(e.message);
-      });
+    }
   }, []);
+
+  const onComplete = useCallback(
+    (session: Session) => {
+      setSessions((old) => [
+        session,
+        ...old.filter((s) => s.id !== session.id),
+      ]);
+      setSelected(session);
+      setView("review");
+      void persist(session);
+    },
+    [persist],
+  );
   const studio = useStudio(onComplete);
+
   useEffect(() => {
     void listSessions()
-      .then(setSessions)
-      .catch((e) => setNotice(e.message));
-  }, []);
-  useEffect(() => {
-    if (!selected?.video) {
-      setReviewVideo(null);
-      return;
-    }
-    const url = URL.createObjectURL(selected.video);
-    setReviewVideo(url);
-    return () => URL.revokeObjectURL(url);
-  }, [selected?.id, selected?.video]);
-  useEffect(() => {
-    setReviewTime(0);
-    setShowPredictions(false);
-  }, [selected?.id]);
-  useEffect(() => {
-    const video = reviewRef.current;
-    if (view !== "review" || !video || !reviewVideo) return;
-    let stopped = false;
-    let frameCallback: number | null = null;
-    let animationFrame = 0;
-    const schedule = () => {
-      if (video.requestVideoFrameCallback) {
-        frameCallback = video.requestVideoFrameCallback(() => {
-          if (stopped) return;
-          syncReviewVideo(video);
-          schedule();
-        });
-      } else {
-        animationFrame = requestAnimationFrame(() => {
-          if (stopped) return;
-          if (!video.paused) syncReviewVideo(video);
-          schedule();
-        });
-      }
-    };
-    schedule();
+      .then((saved) =>
+        setSessions((current) => [
+          ...current,
+          ...saved.filter((s) => !current.some((c) => c.id === s.id)),
+        ]),
+      )
+      .catch((e: Error) => setNotice(e.message));
     return () => {
-      stopped = true;
-      if (frameCallback !== null)
-        video.cancelVideoFrameCallback?.(frameCallback);
-      cancelAnimationFrame(animationFrame);
+      void audio.current?.close();
     };
-  }, [view, reviewVideo, syncReviewVideo]);
+  }, []);
+  // Completion can come from the timer, a clip ending, or Stop & save.
+  // Always release capture before showing the saved round.
   useEffect(() => {
-    if (!sound || !studio.running || !("speechSynthesis" in window)) return;
-    const announce = () => {
-      const voices = window.speechSynthesis.getVoices();
-      const voice =
-        voices.find((v) => v.localService && v.lang.startsWith("en")) ??
-        voices.find((v) => v.localService);
-      if (!voice) {
-        setNotice(
-          "No local speech voice is available. Visual drill prompts are still available.",
-        );
-        return;
+    if (view === "review" && studio.status !== "off") void studio.stop();
+  }, [view, studio.status, studio.stop]);
+
+  const cancelCountdown = useCallback(() => {
+    setReadiness(gate.current.cancel());
+    lastBeep.current = -1;
+  }, []);
+  const beep = useCallback(
+    (start = false) => {
+      if (!sound || !audio.current || audio.current.state !== "running") return;
+      const context = audio.current;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.frequency.value = start ? 880 : 540;
+      gain.gain.setValueAtTime(0.12, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.2);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.22);
+    },
+    [sound],
+  );
+  const begin = useCallback(async () => {
+    beep(true);
+    await studio.beginRound({
+      stance,
+      drill: "open",
+      durationSeconds: duration,
+      record: true,
+      // Stance is explicitly selected. Per-arm observability gates detections,
+      // never video recording; this is not a technique calibration.
+      calibrated: true,
+    });
+  }, [beep, studio.beginRound, stance, duration]);
+  const latestBegin = useRef(begin);
+  latestBegin.current = begin;
+  useEffect(() => {
+    if (!readiness.pending) return;
+    const tick = () => {
+      const next = gate.current.update({ nowMs: performance.now() });
+      setReadiness(next);
+      if (
+        next.countdownSeconds > 0 &&
+        next.countdownSeconds <= 3 &&
+        next.countdownSeconds !== lastBeep.current
+      ) {
+        lastBeep.current = next.countdownSeconds;
+        beep();
       }
-      const words = new SpeechSynthesisUtterance(
-        activeDrill.sequence.join(", "),
-      );
-      words.voice = voice;
-      words.rate = 0.9;
-      window.speechSynthesis.speak(words);
+      if (next.start) void latestBegin.current();
     };
-    announce();
-    const timer = window.setInterval(announce, 6500);
+    const timer = window.setInterval(tick, 80);
+    const hidden = () => {
+      if (document.hidden) cancelCountdown();
+    };
+    document.addEventListener("visibilitychange", hidden);
     return () => {
       clearInterval(timer);
-      window.speechSynthesis.cancel();
+      document.removeEventListener("visibilitychange", hidden);
     };
-  }, [sound, studio.running, activeDrill]);
+  }, [readiness.pending, beep, cancelCountdown]);
+  useEffect(() => {
+    if (studio.status !== "ready") cancelCountdown();
+  }, [studio.status, cancelCountdown]);
 
-  const navigate = async (next: View) => {
-    if (next !== "studio") {
+  const startSource = async (kind: "camera" | "demo" | "file", file?: File) => {
+    cancelCountdown();
+    setNotice(null);
+    await studio.start(kind, model, file);
+  };
+  const record = () => {
+    if (sound) {
+      try {
+        audio.current ??= new AudioContext();
+        void audio.current.resume().catch(() => {});
+      } catch {
+        /* Visual countdown remains available if audio is unsupported. */
+      }
+    }
+    if (studio.source === "camera")
+      setReadiness(gate.current.arm(performance.now()));
+    else void begin();
+  };
+  const stop = async () => {
+    cancelCountdown();
+    setFinishing(true);
+    try {
       await studio.stop();
-      setCalibrated(false);
-      setSideConfirmed(false);
+    } finally {
+      setFinishing(false);
     }
+  };
+  const navigate = async (next: "practice" | "review") => {
+    cancelCountdown();
+    await studio.stop();
+    if (next === "review" && !selected) setSelected(sessions[0] ?? null);
     setView(next);
-  };
-  const startSource = async (source: "camera" | "demo", file?: File) => {
-    setCompleteId(null);
-    setCalibrated(false);
-    setSideConfirmed(false);
-    await studio.start(file ? "file" : source, model, file);
-  };
-  const importVideo = async (file?: File) => {
-    if (!file) return;
-    if (file.size > 500 * 1024 * 1024) {
-      setNotice(
-        "Choose a clip smaller than 500 MB. Short clips are easier to inspect.",
-      );
-      return;
-    }
-    setView("studio");
-    await startSource("camera", file);
-  };
-  const begin = () => {
-    setCompleteId(null);
-    studio.beginRound({
-      stance,
-      drill,
-      durationSeconds: duration,
-      record,
-      calibrated,
-    });
-  };
-  const seek = (ms: number) => {
-    if (!selected) return;
-    const next = Math.max(0, Math.min(selected.durationMs, ms));
-    setReviewTime(next);
-    if (reviewRef.current && reviewVideo)
-      reviewRef.current.currentTime =
-        (next + (selected.videoOffsetMs ?? 0)) / 1000;
   };
   const updateSession = async (session: Session) => {
     setSelected(session);
     setSessions((old) => old.map((s) => (s.id === session.id ? session : s)));
-    try {
-      await saveSession(session);
-    } catch (e) {
-      setNotice(
-        e instanceof Error
-          ? e.message
-          : "Could not save this change. Export to preserve your labels.",
-      );
-    }
+    await persist(session);
   };
-  const addAnnotation = () => {
-    if (!selected) return;
-    if (
-      !Number.isFinite(annotationStart) ||
-      !Number.isFinite(annotationEnd) ||
-      annotationStart < 0 ||
-      annotationEnd <= annotationStart ||
-      annotationEnd * 1000 > selected.durationMs + 1
-    ) {
-      setNotice("Choose a valid start and end inside this round.");
-      return;
-    }
-    const annotation: SessionAnnotation = {
-      id: crypto.randomUUID(),
-      startMs: annotationStart * 1000,
-      endMs: annotationEnd * 1000,
-      label: annotationLabel,
-      hand: annotationHand,
-      note: annotationNote.trim(),
-    };
-    void updateSession({
-      ...selected,
-      annotationsComplete: false,
-      annotations: [...selected.annotations, annotation].sort(
-        (a, b) => a.startMs - b.startMs,
-      ),
-    });
-    setAnnotationNote("");
-  };
-  const remove = async () => {
-    if (!selected) return;
-    try {
-      await deleteSession(selected.id);
-      setSessions((old) => old.filter((s) => s.id !== selected.id));
-      setSelected(null);
-    } catch {
-      setNotice("Could not delete this round from local storage.");
-    }
-  };
-  const nearestFrame = selected?.frames.reduce(
-    (best, f) =>
-      Math.abs(f.t - reviewTime) < Math.abs(best.t - reviewTime) ? f : best,
-    selected.frames[0],
-  );
-  // A frozen pose is misleading over video that was not actually observed.
-  const currentFrame =
-    nearestFrame && Math.abs(nearestFrame.t - reviewTime) <= 100
-      ? nearestFrame
-      : null;
-  const leadCount = studio.events.filter((e) => e.role === "lead").length;
-  const rearCount = studio.events.filter((e) => e.role === "rear").length;
-  const canBegin =
-    studio.status === "ready" &&
-    (studio.source === "demo" || studio.source === "file" || calibrated);
-  const motionOnly = !selected?.video;
-  const title =
-    view === "studio"
-      ? "Practice"
-      : view === "review"
-        ? "Review"
-        : "Diagnostics";
+  const tracking = studio.frame ? assessArmTracking(studio.frame) : null;
+  const active = studio.running || readiness.pending || finishing;
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <header className="app-header">
         <a
-          className="brand"
-          href="#studio"
+          className="wordmark"
+          href="#"
           onClick={(e) => {
             e.preventDefault();
-            void navigate("studio");
+            if (!active && studio.status !== "loading")
+              void navigate("practice");
           }}
+          aria-label="Corner home"
         >
-          <span className="brand-mark">
-            <i />
-            <i />
-          </span>
-          <span>
-            corner<span className="brand-dot">.</span>
-          </span>
+          <span className="corner-mark" />
+          Corner<span className="preview-tag">preview</span>
         </a>
-        <div className="sidebar-caption">YOUR PRACTICE SPACE</div>
         <nav aria-label="Main navigation">
           <button
-            className={`nav-item ${view === "studio" ? "active" : ""}`}
-            onClick={() => void navigate("studio")}
+            aria-current={view === "practice" ? "page" : undefined}
+            onClick={() => void navigate("practice")}
+            disabled={active || studio.status === "loading"}
           >
-            <ScanLine size={19} /> <span>Training studio</span>
-            <span className="nav-active-dot" />
+            Practice
           </button>
           <button
-            className={`nav-item ${view === "review" ? "active" : ""}`}
+            aria-current={view === "review" ? "page" : undefined}
             onClick={() => void navigate("review")}
+            disabled={active || studio.status === "loading"}
           >
-            <Film size={19} /> <span>Round review</span>
+            Saved rounds
             {sessions.length > 0 && (
               <span className="nav-count">{sessions.length}</span>
             )}
           </button>
         </nav>
-        <div className="sidebar-bottom">
-          <div className="local-badge">
-            <ShieldCheck size={17} />
-            <span>Private by default</span>
-          </div>
-          <p>
-            Camera analysis stays
-            <br />
-            on this device.
-          </p>
-          <button className="text-button" onClick={() => setHelp(true)}>
-            About this prototype <ArrowRight size={14} />
-          </button>
-          <div className="version">CORNER / LOCAL PREVIEW 0.1</div>
-        </div>
-      </aside>
+      </header>
       <main>
-        <div className="page-heading">
-          <div>
-            <h1>{title}</h1>
-            <p>
-              {view === "studio"
-                ? "Enable your camera, confirm your setup, then start a round."
-                : view === "review"
-                  ? "Watch your round, then check the experimental punch detections."
-                  : "Understand what the camera sees, and where the prototype still needs validation."}
-            </p>
-          </div>
-          <button
-            className="button secondary heading-help"
-            onClick={() => setHelp(true)}
-          >
-            <Info size={16} /> Getting started
-          </button>
-        </div>
         {(notice || studio.error) && (
           <div className="notice" role="alert">
-            <Info size={18} />
             <span>{notice || studio.error}</span>
             <button
               aria-label="Dismiss message"
@@ -423,1171 +234,286 @@ function App() {
             </button>
           </div>
         )}
-
-        <section hidden={view !== "studio"} className="studio-layout">
-          <div className="studio-main">
-            <div className="camera-stage" ref={stageRef}>
-              <video
-                ref={studio.videoRef}
-                muted
-                playsInline
-                className={`camera-video ${mirror ? "mirrored" : ""}`}
-                style={{
-                  visibility:
-                    studio.source === "camera" || studio.source === "file"
-                      ? "visible"
-                      : "hidden",
-                }}
-              />
-              {!studio.source && (
-                <div className="stage-idle">
-                  <div className="stage-grid" />
-                  <div className="idle-target">
-                    <span />
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <PoseOverlay frame={demoFrame(0)} mirror={false} silhouette />
-                  <div className="idle-copy">
-                    <h2>Set up your camera.</h2>
-                    <p>Keep your head, hips, and full arm reach in view.</p>
-                    <button
-                      className="button primary"
-                      onClick={() => void startSource("camera")}
-                    >
-                      <Camera size={18} /> Enable camera
-                    </button>
-                    <button
-                      className="demo-link"
-                      onClick={() => void startSource("demo")}
-                    >
-                      Explore a simulated round <ArrowRight size={14} />
-                    </button>
-                  </div>
-                </div>
-              )}
-              {studio.source === "demo" && (
-                <>
-                  <div className="stage-grid" />
-                  <div className="demo-watermark">
-                    MOVEMENT STUDY <span>01 / SYNTHETIC</span>
-                  </div>
-                </>
-              )}
-              {overlay && studio.source && (
+        {/* Keep the capture element mounted for source lifecycle and ended events. */}
+        <section hidden={view !== "practice"} className="practice">
+          <div className="page-heading">
+            <div>
+              <h1>Practice</h1>
+              <p>Make space. Take your stance. Start a round.</p>
+            </div>
+            <span className="local-badge">
+              <span /> On your device
+            </span>
+          </div>
+          <div
+            className={`camera-stage ${studio.source === "demo" ? "demo-stage" : ""}`}
+          >
+            <video
+              ref={studio.videoRef}
+              muted
+              playsInline
+              className={
+                studio.source === "demo" || studio.status === "off"
+                  ? "capture-hidden"
+                  : ""
+              }
+              style={{
+                transform:
+                  studio.source === "camera" ? "scaleX(-1)" : undefined,
+              }}
+            />
+            {(overlay || studio.source === "demo") &&
+              studio.status === "ready" && (
                 <PoseOverlay
                   frame={studio.frame}
-                  mirror={studio.source === "demo" ? false : mirror}
+                  mirror={studio.source === "camera"}
                   silhouette={studio.source === "demo"}
                 />
               )}
-              <div className="stage-top">
-                <span
-                  className={`stage-source ${studio.source === "demo" ? "demo" : ""}`}
-                >
-                  <span
-                    className={`status-dot ${studio.status === "off" ? "off" : ""}`}
-                  />
-                  {studio.source === "demo"
-                    ? "SIMULATED DEMO"
-                    : studio.source === "file"
-                      ? "LOCAL VIDEO"
-                      : studio.source === "camera"
-                        ? "YOUR CAMERA"
-                        : "CAMERA OFF"}
-                </span>
-                <div className="stage-top-right">
-                  <button
-                    aria-label="Fullscreen camera"
-                    onClick={() =>
-                      void stageRef.current
-                        ?.requestFullscreen?.()
-                        .catch(() =>
-                          setNotice(
-                            "Fullscreen is unavailable in this browser.",
-                          ),
-                        )
-                    }
-                  >
-                    <Maximize2 size={17} />
-                  </button>
+            {studio.status === "off" && (
+              <div className="stage-empty">
+                <div className="camera-symbol">
+                  <Camera size={28} strokeWidth={1.4} />
                 </div>
-              </div>
-              {studio.status === "loading" && (
-                <div className="stage-loading">
-                  <span className="spinner" />
-                  <h3>Preparing your space</h3>
-                  <p>Loading the local pose model…</p>
-                </div>
-              )}
-              {studio.source && studio.status === "ready" && (
-                <div className="stage-bottom">
-                  <div className="tracking-status">
-                    <span
-                      className={`status-dot ${studio.quality.assessable ? "" : "warning"}`}
-                    />
-                    <div>
-                      <strong>
-                        {studio.source === "demo"
-                          ? "Simulated body tracking"
-                          : studio.quality.label}
-                      </strong>
-                      <span>
-                        {studio.source === "demo"
-                          ? "Interface demo · not an accuracy test"
-                          : studio.quality.reasons[0] ||
-                            "Visible upper-body landmarks · experimental analysis"}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    className={`overlay-button ${overlay ? "enabled" : ""}`}
-                    aria-label="Toggle skeleton overlay"
-                    aria-pressed={overlay}
-                    onClick={() => setOverlay((v) => !v)}
-                  >
-                    <ScanLine size={17} /> Skeleton
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="camera-toolbar">
-              <div className="camera-toolbar-left">
-                <ShieldCheck size={16} />
-                <span>
-                  {studio.source === "file"
-                    ? "Imported clip stays local"
-                    : record && studio.running && studio.source === "camera"
-                      ? "Recording video locally"
-                      : "On-device analysis"}
-                  <span className="toolbar-dot">·</span>
-                  {studio.source === "demo"
-                    ? "No camera used"
-                    : studio.source === "file"
-                      ? "Original saved with analysis"
-                      : record
-                        ? "Video saves with the round"
-                        : "Video recording off"}
-                </span>
-              </div>
-              <div>
+                <h2>Your space to practice.</h2>
+                <p>Enable the webcam to get started.</p>
                 <button
-                  className="icon-text"
-                  onClick={() => uploadRef.current?.click()}
-                  disabled={studio.running}
+                  className="button primary"
+                  onClick={() => void startSource("camera")}
                 >
-                  <Upload size={15} /> Import clip
+                  <Camera size={17} />
+                  Enable camera
                 </button>
-                {studio.source && (
-                  <button
-                    className="icon-text"
-                    onClick={() => {
-                      void studio.stop();
-                      setCalibrated(false);
-                    }}
-                  >
-                    <Square size={13} /> Stop{" "}
-                    {studio.source === "camera" ? "camera" : "source"}
-                  </button>
+              </div>
+            )}
+            {studio.status === "loading" && (
+              <div className="stage-message">
+                <span className="spinner" />
+                <h2>Preparing the camera & tracking…</h2>
+                <p>This can take a moment the first time.</p>
+              </div>
+            )}
+            {readiness.pending && (
+              <div className="countdown-overlay" aria-live="polite">
+                <span className="countdown-number">
+                  {readiness.countdownSeconds}
+                </span>
+                <h2>Step back into position</h2>
+                <p>Recording starts automatically. Keep your hands in view.</p>
+              </div>
+            )}
+            {studio.status === "ready" && !readiness.pending && (
+              <div className="stage-topline">
+                <span className="stage-pill">
+                  {studio.running ? (
+                    <>
+                      <i className="record-dot" />
+                      {studio.source === "camera" ? "Recording" : "Running"}
+                    </>
+                  ) : studio.source === "demo" ? (
+                    "Simulated demo"
+                  ) : studio.source === "file" ? (
+                    "Imported clip"
+                  ) : (
+                    "Camera ready"
+                  )}
+                </span>
+                {studio.running && (
+                  <span className="round-clock">
+                    {formatTime(Math.max(0, duration * 1000 - studio.elapsed))}
+                  </span>
                 )}
               </div>
-            </div>
-            <input
-              type="file"
-              ref={uploadRef}
-              accept="video/*"
-              hidden
-              onChange={(e) => {
-                void importVideo(e.target.files?.[0]);
-                e.target.value = "";
-              }}
-            />
-
-            <div className="round-strip">
-              <div className="round-clock">
-                <Timer size={19} />
-                <strong>
-                  {formatTime(
-                    studio.running
-                      ? Math.max(0, duration * 1000 - studio.elapsed)
-                      : duration * 1000,
-                  )}
-                </strong>
-                <span>{studio.running ? "REMAINING" : "ROUND LENGTH"}</span>
-              </div>
-              <div className="round-count">
-                <strong>{leadCount.toString().padStart(2, "0")}</strong>
-                <span>Jabs</span>
-              </div>
-              <div className="round-count">
-                <strong>{rearCount.toString().padStart(2, "0")}</strong>
-                <span>Crosses</span>
-              </div>
-              <button
-                className={`button ${studio.running ? "danger" : "primary"} round-start`}
-                disabled={!studio.running && !canBegin}
-                onClick={() =>
-                  studio.running ? void studio.finishRound() : begin()
-                }
-              >
-                {studio.running ? <Square size={16} /> : <Play size={17} />}{" "}
-                {studio.running
-                  ? "Finish round"
-                  : studio.source === "file"
-                    ? "Analyze clip"
-                    : "Start round"}
-              </button>
-            </div>
-            {!studio.running && !completeId && (
-              <p className="next-step">
-                {!studio.source
-                  ? "First, enable your camera."
-                  : studio.status === "loading"
-                    ? "Preparing the camera and local model…"
-                    : !canBegin
-                      ? "Confirm your camera setup to unlock Start round."
-                      : "Ready. Start your round when you are in position."}
-              </p>
             )}
-            {completeId && (
-              <div className="completed-banner">
-                <CheckCircle2 size={20} />
-                <div>
-                  <strong>Your round is ready to review.</strong>
-                  <span>
-                    {saveState === "saving"
-                      ? "Saving to this browser…"
-                      : saveState === "saved"
-                        ? `Saved locally with movement data${selected?.video ? " and video" : ""}.`
-                        : "Local save failed. Export this round before closing."}
-                  </span>
-                </div>
-                <button
-                  className="text-button"
-                  onClick={() => void navigate("review")}
+            {studio.status === "ready" && !readiness.pending && (
+              <div className="tracking-strip" aria-label="Arm tracking">
+                <span
+                  className={
+                    tracking?.left.assessable ? "tracked" : "uncertain"
+                  }
                 >
-                  Review round <ArrowRight size={16} />
-                </button>
+                  L · {tracking?.left.assessable ? "tracked" : "uncertain"}
+                </span>
+                <span
+                  className={
+                    tracking?.right.assessable ? "tracked" : "uncertain"
+                  }
+                >
+                  R · {tracking?.right.assessable ? "tracked" : "uncertain"}
+                </span>
               </div>
             )}
-
-            <div className="evidence-note">
-              <FlaskConical size={16} />
-              <p>
-                Punch counts are experimental. Technique corrections are not
-                enabled yet.
-              </p>
+          </div>
+          <div className="practice-controls">
+            <div className="round-settings">
+              <label>
+                Lead hand
+                <select
+                  aria-label="Lead hand"
+                  value={stance}
+                  disabled={active || studio.status === "loading"}
+                  onChange={(e) => setStance(e.target.value as Stance)}
+                >
+                  <option value="orthodox">Left hand leads</option>
+                  <option value="southpaw">Right hand leads</option>
+                </select>
+              </label>
+              <label>
+                Round
+                <select
+                  aria-label="Round duration"
+                  value={duration}
+                  disabled={active || studio.status === "loading"}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                >
+                  <option value={30}>30 seconds</option>
+                  <option value={60}>1 minute</option>
+                  <option value={120}>2 minutes</option>
+                  <option value={180}>3 minutes</option>
+                </select>
+              </label>
+            </div>
+            <div className="action-group">
+              {readiness.pending ? (
+                <button className="button secondary" onClick={cancelCountdown}>
+                  Cancel countdown
+                </button>
+              ) : studio.running || finishing ? (
+                <button
+                  className="button stop"
+                  disabled={finishing}
+                  onClick={() => void stop()}
+                >
+                  <Square size={15} fill="currentColor" />
+                  {finishing ? "Saving…" : "Stop & save"}
+                </button>
+              ) : studio.status === "ready" ? (
+                <button className="button primary" onClick={record}>
+                  <Circle size={14} fill="currentColor" />
+                  {studio.source === "camera"
+                    ? "Record round"
+                    : studio.source === "file"
+                      ? "Analyze clip"
+                      : "Start demo"}
+                </button>
+              ) : null}
+              {studio.status !== "off" && !active && (
+                <button className="text-button" onClick={() => void stop()}>
+                  {studio.source === "camera" ? "Stop camera" : "Close source"}
+                </button>
+              )}
             </div>
           </div>
-
-          <aside className="session-panel">
-            <h2>Round setup</h2>
-            <div className="settings-row">
-              <label htmlFor="drill">Drill</label>
-              <select
-                id="drill"
-                value={drill}
-                disabled={studio.running}
-                onChange={(e) => setDrill(e.target.value)}
-              >
-                {DRILLS.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <p className="panel-description">{activeDrill.tip}</p>
-            <div className="panel-divider" />
-            <label className="field-label">YOUR STANCE</label>
-            <div className="segmented">
-              <button
-                aria-pressed={stance === "orthodox"}
-                disabled={studio.running}
-                onClick={() => {
-                  setStance("orthodox");
-                  setCalibrated(false);
-                }}
-              >
-                Orthodox
-              </button>
-              <button
-                aria-pressed={stance === "southpaw"}
-                disabled={studio.running}
-                onClick={() => {
-                  setStance("southpaw");
-                  setCalibrated(false);
-                }}
-              >
-                Southpaw
-              </button>
-            </div>
-            <p className="field-hint">
-              {stance === "orthodox"
-                ? "Left hand leads · right hand follows"
-                : "Right hand leads · left hand follows"}
-            </p>
-            <div className="settings-row">
-              <label htmlFor="duration">Round length</label>
-              <select
-                id="duration"
-                value={duration}
-                disabled={studio.running}
-                onChange={(e) => setDuration(Number(e.target.value))}
-              >
-                <option value={60}>1 minute</option>
-                <option value={120}>2 minutes</option>
-                <option value={180}>3 minutes</option>
-                <option value={600}>10 minutes</option>
-              </select>
-            </div>
-            <label className="switch-row">
+          <div className="practice-note">
+            {studio.source === "file"
+              ? "Imported clip stays local. Analysis saves the original video with its tracking."
+              : studio.source === "demo"
+                ? "Synthetic motion for trying the controls. No camera or accuracy measurement."
+                : "Record round gives you 8 seconds to step back, then saves video + tracking locally. No microphone."}
+          </div>
+          {studio.running && (
+            <div className="live-counts">
               <span>
-                Save round video <small>Optional · local only</small>
+                <b>{studio.events.filter((e) => e.label === "jab").length}</b>{" "}
+                jabs
               </span>
-              <input
-                type="checkbox"
-                checked={record}
-                disabled={studio.running}
-                onChange={(e) => setRecord(e.target.checked)}
-              />
-              <span className="switch" />
-            </label>
-            <div className="panel-divider" />
-            <div className="setup-title">
-              <Crosshair size={16} />
-              <h3>Confirm camera setup</h3>
-              {calibrated && <CheckCircle2 size={16} />}
+              <span>
+                <b>{studio.events.filter((e) => e.label === "cross").length}</b>{" "}
+                crosses
+              </span>
+              <small>
+                Experimental counts · tracking is not a technique judgment
+              </small>
             </div>
-            {studio.status !== "ready" && (
-              <ol className="setup-list">
-                <li>
-                  <span>01</span>Keep your head, hips, and full arm reach in
-                  frame.
-                </li>
-                <li>
-                  <span>02</span>Use even light. Leave space around your hands.
-                </li>
-                <li>
-                  <span>03</span>Raise your left hand. Check that the L label
-                  follows it.
-                </li>
-              </ol>
-            )}
-            {studio.source === "camera" &&
-              studio.status === "ready" &&
-              !calibrated && (
-                <div className="calibration">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={sideConfirmed}
-                      onChange={(e) => setSideConfirmed(e.target.checked)}
-                    />
-                    I raised my left hand and the L label follows it.
-                  </label>
-                  <button
-                    className="button secondary"
-                    disabled={!sideConfirmed || !studio.quality.assessable}
-                    onClick={() => setCalibrated(true)}
-                  >
-                    <Check size={15} /> Use this setup
-                  </button>
-                  <small>
-                    {!studio.quality.assessable
-                      ? "Keep both wrists, elbows, shoulders and hips visible."
-                      : "This confirms tracking setup, not correct technique."}
-                  </small>
-                </div>
-              )}
-            {calibrated && (
-              <div className="setup-ready">
-                <Check size={16} /> Setup confirmed. Settle into guard.
-              </div>
-            )}
-            {studio.source === "file" && (
-              <div className="calibration">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={calibrated}
-                    onChange={(e) => setCalibrated(e.target.checked)}
-                  />
-                  I confirmed this clip’s stance and unmirrored anatomical
-                  sides.
-                </label>
-                <small>
-                  Unconfirmed clips save pose data without classifying punches.
-                </small>
-              </div>
-            )}
-            <details className="optional-controls">
-              <summary>More options</summary>
-              <div className="settings-row">
-                <label htmlFor="model">Pose model</label>
-                <select
-                  id="model"
-                  value={model}
-                  disabled={!!studio.source}
-                  onChange={(e) => setModel(e.target.value as ModelVariant)}
-                >
-                  <option value="full">Full · balanced</option>
-                  <option value="heavy">Heavy · detailed</option>
-                  <option value="lite">Lite · lighter</option>
-                </select>
-              </div>
-              <label className="switch-row">
-                <span>Mirror preview</span>
+          )}
+          <details className="options" open={active ? false : undefined}>
+            <summary>More options</summary>
+            <div className="options-content">
+              <label className="checkbox">
                 <input
                   type="checkbox"
-                  checked={mirror}
-                  onChange={(e) => setMirror(e.target.checked)}
+                  checked={overlay}
+                  onChange={(e) => setOverlay(e.target.checked)}
                 />
-                <span className="switch" />
+                Show tracking
               </label>
-              <label className="switch-row">
-                <span>
-                  {sound ? <Volume2 size={15} /> : <VolumeX size={15} />} Drill
-                  callouts <small>Prompts, not technique judgments</small>
-                </span>
+              <label className="checkbox">
                 <input
                   type="checkbox"
                   checked={sound}
+                  disabled={active || studio.status === "loading"}
                   onChange={(e) => setSound(e.target.checked)}
                 />
-                <span className="switch" />
+                Countdown sound
+              </label>
+              <label>
+                Model
+                <select
+                  aria-label="Model"
+                  value={model}
+                  disabled={studio.status !== "off" || active}
+                  onChange={(e) => setModel(e.target.value as ModelVariant)}
+                >
+                  <option value="full">Full</option>
+                  <option value="lite">Lite</option>
+                  <option value="heavy">Heavy</option>
+                </select>
               </label>
               <button
                 className="text-button"
-                onClick={() => void navigate("lab")}
+                disabled={active || studio.status === "loading"}
+                onClick={() => uploadRef.current?.click()}
               >
-                Advanced diagnostics <ArrowRight size={14} />
+                <Upload size={15} />
+                Open video
               </button>
-            </details>
-          </aside>
-        </section>
-
-        {view === "review" && (
-          <section className="review-layout">
-            <aside className="round-library">
-              <div className="section-label">
-                <h2>Your rounds</h2>
-                <span>{sessions.length.toString().padStart(2, "0")}</span>
-              </div>
-              {sessions.length === 0 ? (
-                <div className="library-empty">
-                  <Film size={28} />
-                  <p>
-                    A little practice.
-                    <br />
-                    Something to look back on.
-                  </p>
-                  <button
-                    className="text-button"
-                    onClick={() => void navigate("studio")}
-                  >
-                    Start a round <ArrowRight size={14} />
-                  </button>
-                </div>
-              ) : (
-                sessions.map((s) => (
-                  <button
-                    key={s.id}
-                    className={`session-item ${selected?.id === s.id ? "selected" : ""}`}
-                    onClick={() => setSelected(s)}
-                  >
-                    <span className="session-symbol">
-                      {s.source === "demo" ? (
-                        <FlaskConical size={18} />
-                      ) : (
-                        <Film size={18} />
-                      )}
-                    </span>
-                    <span>
-                      <strong>
-                        {DRILLS.find((d) => d.id === s.drill)?.title || s.drill}
-                      </strong>
-                      <small>
-                        {new Date(s.createdAt).toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                        })}{" "}
-                        · {formatTime(s.durationMs)} ·{" "}
-                        {s.source === "demo"
-                          ? "Demo"
-                          : s.video
-                            ? "Video + motion"
-                            : "Motion only"}
-                      </small>
-                    </span>
-                    <ChevronRight size={15} />
-                  </button>
-                ))
-              )}
-            </aside>
-            {selected ? (
-              <div className="review-main">
-                <div className="review-heading">
-                  <div>
-                    <span className="tiny-label">
-                      {selected.source === "demo"
-                        ? "SIMULATED DEMONSTRATION"
-                        : "LOCAL ROUND"}{" "}
-                      / {selected.stance.toUpperCase()}
-                    </span>
-                    <h2>
-                      {DRILLS.find((d) => d.id === selected.drill)?.title ||
-                        selected.drill}
-                    </h2>
-                  </div>
-                  <div className="button-group">
-                    <button
-                      className="button secondary"
-                      onClick={() => exportSession(selected)}
-                    >
-                      <ArrowDownToLine size={15} /> Evidence JSON
-                    </button>
-                    {selected.video && (
-                      <button
-                        className="icon-button"
-                        title="Export video"
-                        aria-label="Export video"
-                        onClick={() =>
-                          downloadBlob(
-                            selected.video!,
-                            `corner-${selected.id}.${selected.video!.type.includes("mp4") ? "mp4" : "webm"}`,
-                          )
-                        }
-                      >
-                        <Film size={17} />
-                      </button>
-                    )}
-                    <button
-                      className="icon-button delete"
-                      aria-label="Delete this round"
-                      title="Delete this round"
-                      onClick={() => void remove()}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-                <div className="replay-stage">
-                  {reviewVideo ? (
-                    <video
-                      ref={reviewRef}
-                      src={reviewVideo}
-                      controls
-                      playsInline
-                      onLoadedMetadata={(e) => {
-                        e.currentTarget.currentTime =
-                          (selected.videoOffsetMs ?? 0) / 1000;
-                        syncReviewVideo(e.currentTarget);
-                      }}
-                      onSeeking={(e) => syncReviewVideo(e.currentTarget)}
-                      onSeeked={(e) => syncReviewVideo(e.currentTarget)}
-                      onPlay={(e) => syncReviewVideo(e.currentTarget)}
-                      onTimeUpdate={(e) => syncReviewVideo(e.currentTarget)}
-                    />
-                  ) : (
-                    <>
-                      <div className="stage-grid" />
-                      <div className="replay-label">
-                        {selected.source === "demo"
-                          ? "SIMULATED REPLAY"
-                          : "MOTION REPLAY"}
-                        <span>
-                          {" "}
-                          {selected.source === "demo"
-                            ? "Synthetic landmarks · not a benchmark"
-                            : "Video was not recorded"}
-                        </span>
-                      </div>
-                    </>
-                  )}
-                  {currentFrame && (
-                    <PoseOverlay
-                      frame={currentFrame}
-                      mirror={false}
-                      silhouette={motionOnly}
-                    />
-                  )}
-                </div>
-                {!currentFrame && (
-                  <p className="section-description" role="status">
-                    No recent pose sample at this moment. The overlay is hidden.
-                  </p>
-                )}
-                <div className="replay-controls">
-                  <button
-                    className="icon-button"
-                    aria-label="Previous frame"
-                    onClick={() =>
-                      seek(
-                        selected.frames
-                          .filter((f) => f.t < reviewTime - 1)
-                          .at(-1)?.t ?? 0,
-                      )
-                    }
-                  >
-                    <ChevronLeft size={18} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label="Next frame"
-                    onClick={() =>
-                      seek(
-                        selected.frames.find((f) => f.t > reviewTime + 1)?.t ??
-                          selected.durationMs,
-                      )
-                    }
-                  >
-                    <ChevronRight size={18} />
-                  </button>
-                  <span>{(reviewTime / 1000).toFixed(2)}s</span>
-                  <input
-                    aria-label="Replay position"
-                    type="range"
-                    min={0}
-                    max={selected.durationMs || 1}
-                    step={1}
-                    value={Math.min(reviewTime, selected.durationMs)}
-                    onChange={(e) => seek(Number(e.target.value))}
-                  />
-                  <span>{formatTime(selected.durationMs)}</span>
-                </div>
-                <div className="section-label">
-                  <h2>Movement timeline</h2>
-                  <button
-                    className="text-button"
-                    aria-pressed={showPredictions}
-                    onClick={() => setShowPredictions((v) => !v)}
-                  >
-                    {showPredictions
-                      ? "Hide detections"
-                      : "Show experimental detections"}
-                  </button>
-                </div>
-                <p className="section-description">
-                  Watch the video first, then reveal detections to compare.
-                  Counts can miss punches or count other movement.
-                </p>
-                {showPredictions && (
-                  <p className="review-counts">
-                    Jab estimates:{" "}
-                    {selected.events.filter((e) => e.label === "jab").length}
-                    {" · "}Cross estimates:{" "}
-                    {selected.events.filter((e) => e.label === "cross").length}
-                  </p>
-                )}
-                <div className="event-timeline" hidden={!showPredictions}>
-                  {selected.events.length ? (
-                    selected.events.map((event, i) => (
-                      <button
-                        key={event.id}
-                        className="event-chip"
-                        onClick={() => {
-                          seek(event.startMs);
-                          setAnnotationStart(event.startMs / 1000);
-                          setAnnotationEnd(event.endMs / 1000);
-                        }}
-                      >
-                        <span className={`event-hand ${event.role}`}>
-                          {event.label === "jab" ? "1" : "2"}
-                        </span>
-                        <span>
-                          <strong>
-                            {event.label === "jab" ? "Jab" : "Cross"}{" "}
-                            <small>candidate {i + 1}</small>
-                          </strong>
-                          <small>
-                            {(event.startMs / 1000).toFixed(2)}–
-                            {(event.endMs / 1000).toFixed(2)}s · {event.hand}{" "}
-                            hand
-                          </small>
-                        </span>
-                        <ArrowRight size={15} />
-                      </button>
-                    ))
-                  ) : (
-                    <div className="empty-events">
-                      <Activity size={22} />
-                      <span>
-                        No straight-punch events were accepted. Inspect the
-                        replay and add labels; uncertain movement should not
-                        become a guessed punch.
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <details
-                  className="optional-controls"
-                  key={`labels-${selected.id}`}
-                >
-                  <summary>Label this round (optional)</summary>
-                  <div className="annotation-panel">
-                    <div className="section-label">
-                      <h2>Add a reference label</h2>
-                      <span>MANUAL ANNOTATION</span>
-                    </div>
-                    <p className="section-description">
-                      Label the original video where available. Mark definite
-                      false detections “other”; use “unobservable” only when
-                      judgment is impossible. Motion-only replays cannot
-                      independently validate the pose model. Technique
-                      correctness needs coach review.
-                    </p>
-                    <div className="annotation-fields">
-                      <label>
-                        Action
-                        <select
-                          aria-label="Annotation action"
-                          value={annotationLabel}
-                          onChange={(e) =>
-                            setAnnotationLabel(
-                              e.target.value as SessionAnnotation["label"],
-                            )
-                          }
-                        >
-                          {[
-                            "jab",
-                            "cross",
-                            "hook",
-                            "uppercut",
-                            "other",
-                            "unobservable",
-                          ].map((v) => (
-                            <option key={v} value={v}>
-                              {v}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Hand
-                        <select
-                          aria-label="Annotation hand"
-                          value={annotationHand}
-                          onChange={(e) =>
-                            setAnnotationHand(
-                              e.target.value as SessionAnnotation["hand"],
-                            )
-                          }
-                        >
-                          <option>left</option>
-                          <option>right</option>
-                          <option>unknown</option>
-                        </select>
-                      </label>
-                      <label>
-                        Start (s)
-                        <input
-                          aria-label="Annotation start"
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={annotationStart}
-                          onChange={(e) =>
-                            setAnnotationStart(Number(e.target.value))
-                          }
-                        />
-                      </label>
-                      <label>
-                        End (s)
-                        <input
-                          aria-label="Annotation end"
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={annotationEnd}
-                          onChange={(e) =>
-                            setAnnotationEnd(Number(e.target.value))
-                          }
-                        />
-                      </label>
-                    </div>
-                    <div className="annotation-note">
-                      <input
-                        aria-label="Annotation note"
-                        placeholder="What is visible? Any uncertainty?"
-                        value={annotationNote}
-                        maxLength={1000}
-                        onChange={(e) => setAnnotationNote(e.target.value)}
-                      />
-                      <button
-                        className="button primary"
-                        onClick={addAnnotation}
-                      >
-                        <Plus size={16} /> Add label
-                      </button>
-                    </div>
-                    {selected.annotations.map((a) => (
-                      <div className="annotation-row" key={a.id}>
-                        <button onClick={() => seek(a.startMs)}>
-                          <span>
-                            {(a.startMs / 1000).toFixed(2)}–
-                            {(a.endMs / 1000).toFixed(2)}s
-                          </span>
-                          <strong>
-                            {a.label} · {a.hand}
-                          </strong>
-                          <small>{a.note || "No note"}</small>
-                        </button>
-                        <button
-                          className="icon-button"
-                          aria-label="Delete annotation"
-                          onClick={() =>
-                            void updateSession({
-                              ...selected,
-                              annotationsComplete: false,
-                              annotations: selected.annotations.filter(
-                                (x) => x.id !== a.id,
-                              ),
-                            })
-                          }
-                        >
-                          <X size={15} />
-                        </button>
-                      </div>
-                    ))}
-                    <label className="complete-annotation">
-                      <input
-                        type="checkbox"
-                        checked={!!selected.annotationsComplete}
-                        onChange={(e) =>
-                          void updateSession({
-                            ...selected,
-                            annotationsComplete: e.target.checked,
-                          })
-                        }
-                      />{" "}
-                      I reviewed the entire round and labeled every action,
-                      including missed detections.
-                    </label>
-                  </div>
-                </details>
-                <details
-                  className="optional-controls"
-                  key={`metrics-${selected.id}`}
-                >
-                  <summary>Technical details</summary>
-                  <div className="review-stats">
-                    <div>
-                      <strong>{selected.events.length}</strong>
-                      <span>Straight candidates</span>
-                    </div>
-                    <div>
-                      <strong>
-                        {selected.source === "demo"
-                          ? "—"
-                          : Math.round(selected.measuredFps)}
-                      </strong>
-                      <span>Processed pose FPS</span>
-                    </div>
-                    <div>
-                      <strong>
-                        {selected.source === "demo"
-                          ? "—"
-                          : `${Math.round(selected.inferenceP95)} ms`}
-                      </strong>
-                      <span>p95 model inference</span>
-                    </div>
-                    <div>
-                      <strong>{selected.annotations.length}</strong>
-                      <span>Manual labels</span>
-                    </div>
-                  </div>
-                </details>
-              </div>
-            ) : (
-              <div className="review-placeholder">
-                <FolderOpen size={42} />
-                <h2>Your saved rounds appear here.</h2>
-                <p>
-                  Record a round or explore the simulated demo.
-                  <br />
-                  Then replay, label, and export it here.
-                </p>
-                <button
-                  className="button primary"
-                  onClick={() => void navigate("studio")}
-                >
-                  Go to training <ArrowRight size={17} />
-                </button>
-              </div>
-            )}
-          </section>
-        )}
-
-        {view === "lab" && (
-          <section className="lab-layout">
-            <div className="lab-banner">
-              <div className="lab-icon">
-                <FlaskConical size={28} />
-              </div>
-              <div>
-                <span className="tiny-label">MEASUREMENT BEFORE JUDGMENT</span>
-                <h2>A coach should know what it can see.</h2>
-                <p>
-                  This build captures local pose data and proposes
-                  straight-punch events. Its detection thresholds are
-                  experimental. No validated technique corrections or accuracy
-                  claims are enabled.
-                </p>
-              </div>
-              <span className="lab-status">
-                <Circle size={10} /> VALIDATION PENDING
-              </span>
+              <button
+                className="text-button"
+                disabled={active || studio.status === "loading"}
+                onClick={() => void startSource("demo")}
+              >
+                Try demo
+              </button>
             </div>
-            <div className="lab-grid">
-              <article className="lab-card">
-                <ScanLine size={22} />
-                <h3>Real local perception</h3>
-                <p>
-                  MediaPipe Pose Landmarker runs in a dedicated worker, using
-                  assets served from this device. Full, Heavy, and Lite are
-                  available for comparison.
-                </p>
-                <dl>
-                  <div>
-                    <dt>Execution</dt>
-                    <dd>GPU with CPU fallback</dd>
-                  </div>
-                  <div>
-                    <dt>Coordinates</dt>
-                    <dd>Unmirrored, timestamped</dd>
-                  </div>
-                  <div>
-                    <dt>Data path</dt>
-                    <dd>Camera → local worker</dd>
-                  </div>
-                </dl>
-              </article>
-              <article className="lab-card">
-                <Activity size={22} />
-                <h3>Transparent event logic</h3>
-                <p>
-                  A causal motion baseline watches extension and recovery. It
-                  uses actual anatomical sides and rejects missing joints or
-                  interrupted trajectories.
-                </p>
-                <dl>
-                  <div>
-                    <dt>Vocabulary</dt>
-                    <dd>Jab / cross candidates</dd>
-                  </div>
-                  <div>
-                    <dt>Technique scores</dt>
-                    <dd>Not enabled</dd>
-                  </div>
-                  <div>
-                    <dt>Calibration</dt>
-                    <dd>Manual setup confirmation</dd>
-                  </div>
-                </dl>
-              </article>
-              <article className="lab-card">
-                <ShieldCheck size={22} />
-                <h3>Your footage, your choice</h3>
-                <p>
-                  No account, analytics, or cloud video upload. Video recording
-                  is opt-in. Saved rounds and labels live in this browser’s
-                  local database.
-                </p>
-                <dl>
-                  <div>
-                    <dt>Export</dt>
-                    <dd>Evidence JSON + video</dd>
-                  </div>
-                  <div>
-                    <dt>Cloud review</dt>
-                    <dd>Not connected</dd>
-                  </div>
-                  <div>
-                    <dt>Delete</dt>
-                    <dd>Per round in Review</dd>
-                  </div>
-                </dl>
-              </article>
-            </div>
-            <div className="lab-bottom">
-              <article className="benchmark-panel">
-                <div className="section-label">
-                  <h2>Build your benchmark</h2>
-                  <span>THE NEXT USEFUL STEP</span>
-                </div>
-                <div className="benchmark-steps">
-                  <div>
-                    <span>01</span>
-                    <div>
-                      <h3>Capture across days</h3>
-                      <p>
-                        Short jab/cross drills, idle movement, different views,
-                        and natural mistakes. Keep later sessions untouched for
-                        testing.
-                      </p>
-                    </div>
-                  </div>
-                  <div>
-                    <span>02</span>
-                    <div>
-                      <h3>Label the full round</h3>
-                      <p>
-                        Use Review to label actions independently. Include false
-                        detections, missed events, and unobservable movement.
-                      </p>
-                    </div>
-                  </div>
-                  <div>
-                    <span>03</span>
-                    <div>
-                      <h3>Compare evidence</h3>
-                      <p>
-                        Export JSON for the offline evaluator. It reports event
-                        precision/recall and refuses to call synthetic data a
-                        real benchmark.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <button
-                  className="button secondary"
-                  onClick={() => void navigate("review")}
-                >
-                  Open round review <ArrowRight size={16} />
-                </button>
-              </article>
-              <article className="coverage-panel">
-                <div className="section-label">
-                  <h2>Latest round</h2>
-                  <span>OBSERVED, NOT INFERRED</span>
-                </div>
-                {selected ? (
-                  <>
-                    <p>
-                      {selected.source === "demo"
-                        ? "Synthetic demo · metrics excluded from accuracy claims"
-                        : `${selected.frames.length} processed frames · ${selected.model} model`}
-                    </p>
-                    <dl>
-                      <div>
-                        <dt>Duration</dt>
-                        <dd>{formatTime(selected.durationMs)}</dd>
-                      </div>
-                      <div>
-                        <dt>p95 observed frame age</dt>
-                        <dd>
-                          {selected.source === "demo" ||
-                          !selected.frames.some((f) =>
-                            Number.isFinite(f.frameAgeMs),
-                          )
-                            ? "—"
-                            : `${Math.round(
-                                percentile(
-                                  selected.frames.flatMap((f) =>
-                                    Number.isFinite(f.frameAgeMs)
-                                      ? [f.frameAgeMs!]
-                                      : [],
-                                  ),
-                                  0.95,
-                                ),
-                              )} ms`}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Skipped while busy</dt>
-                        <dd>{selected.skippedFrames}</dd>
-                      </div>
-                      <div>
-                        <dt>Manual labels</dt>
-                        <dd>{selected.annotations.length}</dd>
-                      </div>
-                    </dl>
-                    <small>
-                      Frame age starts when the browser loop observes a frame.
-                      It is not sensor-to-screen latency.
-                    </small>
-                  </>
-                ) : (
-                  <div className="library-empty">
-                    <SlidersHorizontal size={26} />
-                    <p>Finish a round to see measured telemetry here.</p>
-                  </div>
-                )}
-              </article>
-            </div>
-          </section>
-        )}
-        <footer>
-          <span>
-            CORNER <span className="footer-slash">/</span> PRACTICE WITH PURPOSE
-          </span>
-          <span>
-            LOCAL PREVIEW <span className="status-dot" />
-          </span>
-        </footer>
-      </main>
-      {help && (
-        <div className="modal-backdrop" onClick={() => setHelp(false)}>
-          <section
-            className="help-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="help-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="modal-close icon-button"
-              aria-label="Close getting started"
-              onClick={() => setHelp(false)}
-            >
-              <X size={20} />
-            </button>
-            <span className="tiny-label">WELCOME TO YOUR CORNER</span>
-            <h2 id="help-title">Camera → round → review</h2>
             <p>
-              Enable your camera, choose a stance and drill, and keep your head,
-              hips, elbows, and hands visible. Confirm your setup, then start a
-              round.
+              Frame your head through hips, leaving room for both arms to
+              extend. L / R are the model’s hand labels: check they follow your
+              physical hands. Amber means uncertain tracking. A visible hand can
+              still be mislabeled.
             </p>
-            <div className="help-step">
-              <Camera />
-              <div>
-                <strong>You control the camera.</strong>
-                <p>
-                  Nothing starts until you enable it. Video recording is off by
-                  default and no microphone is requested.
-                </p>
-              </div>
-            </div>
-            <div className="help-step">
-              <Film />
-              <div>
-                <strong>Review the evidence.</strong>
-                <p>
-                  Rounds save motion data locally. Turn on “Save round video”
-                  before a round if you want video replay too.
-                </p>
-              </div>
-            </div>
-            <div className="help-step">
-              <FlaskConical />
-              <div>
-                <strong>This is a research preview.</strong>
-                <p>
-                  Straight-punch candidates may be missed or misclassified.
-                  Other punches need manual labels. Technique critique is
-                  waiting for coach-reviewed validation.
-                </p>
-              </div>
-            </div>
-            <button className="button primary" onClick={() => setHelp(false)}>
-              Got it <Check size={17} />
-            </button>
-          </section>
-        </div>
-      )}
+          </details>
+          <input
+            ref={uploadRef}
+            type="file"
+            accept="video/*"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file && !active && studio.status !== "loading")
+                void startSource("file", file);
+            }}
+          />
+        </section>
+        {view === "review" && (
+          <RoundReview
+            sessions={sessions}
+            selected={selected}
+            saveState={
+              selected ? (saveStates[selected.id] ?? "saved") : "saved"
+            }
+            onSelect={setSelected}
+            onUpdate={updateSession}
+            onDeleted={(id) => {
+              setSessions((old) => old.filter((s) => s.id !== id));
+              setSelected(null);
+            }}
+            onNotice={setNotice}
+            onPractice={() => void navigate("practice")}
+          />
+        )}
+      </main>
+      <footer>Local video. Experimental jab & cross detection.</footer>
     </div>
   );
 }

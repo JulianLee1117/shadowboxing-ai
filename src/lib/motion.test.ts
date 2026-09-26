@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   anatomicalRole,
   armGeometry,
+  assessArmTracking,
   assessQuality,
   imageDistance,
   MotionEngine,
@@ -58,23 +59,87 @@ const collect = (engine: MotionEngine, frames: PoseFrame[]): PunchEvent[] =>
 const engine = () => new MotionEngine({ stance: "orthodox", calibrated: true });
 
 describe("upper-body acquisition quality", () => {
-  it("requires all relevant upper-body joints and rejects absent/occluded wrists", () => {
+  it("reports each arm independently without substituting for a hidden wrist", () => {
     expect(assessQuality(frame(0)).assessable).toBe(true);
     const hidden = frame(0);
     hidden.landmarks[JOINT.rightWrist].visibility = 0.3;
+    expect(assessQuality(hidden)).toMatchObject({
+      assessable: true,
+      label: "Left arm visible",
+    });
+    expect(assessArmTracking(hidden)).toMatchObject({
+      left: { assessable: true, status: "tracking", reason: null },
+      right: {
+        assessable: false,
+        status: "hidden",
+        projectedAngle: null,
+        projectedReach: null,
+        minimumVisibility: 0.3,
+      },
+    });
+    hidden.landmarks[JOINT.leftWrist].visibility = 0.3;
     expect(assessQuality(hidden).assessable).toBe(false);
     expect(assessQuality({ ...hidden, landmarks: [] }).visibleJoints).toBe(0);
+    expect(assessArmTracking({ ...hidden, landmarks: [] }).left).toMatchObject({
+      assessable: false,
+      status: "invalid",
+      minimumVisibility: null,
+    });
   });
 
-  it("rejects clipping, unknown visibility, invalid time, and invalid dimensions", () => {
+  it("rejects a clipped or uncertain arm and invalid shared frame geometry", () => {
     const clipped = frame(0);
     clipped.landmarks[JOINT.leftWrist].x = -0.1;
-    expect(assessQuality(clipped).assessable).toBe(false);
+    expect(assessArmTracking(clipped).left.assessable).toBe(false);
+    expect(assessArmTracking(clipped).right.assessable).toBe(true);
     const unknown = frame(0);
     delete unknown.landmarks[JOINT.leftElbow].visibility;
-    expect(assessQuality(unknown).assessable).toBe(false);
+    expect(assessArmTracking(unknown).left.assessable).toBe(false);
     expect(assessQuality({ ...frame(0), t: NaN }).assessable).toBe(false);
     expect(assessQuality({ ...frame(0), width: 0 }).assessable).toBe(false);
+    const clippedTorso = frame(0);
+    clippedTorso.landmarks[JOINT.rightHip].y = 1.001;
+    expect(assessArmTracking(clippedTorso)).toMatchObject({
+      left: { assessable: false, status: "invalid" },
+      right: { assessable: false, status: "invalid" },
+    });
+  });
+
+  it("does not require the nose for arm geometry, but requires torso anchors", () => {
+    const hiddenFace = frame(0);
+    hiddenFace.landmarks[JOINT.nose].visibility = 0.1;
+    expect(assessQuality(hiddenFace)).toMatchObject({
+      assessable: true,
+      visibleJoints: 8,
+      totalJoints: 8,
+    });
+    hiddenFace.landmarks[JOINT.leftShoulder].visibility = 0.1;
+    expect(assessQuality(hiddenFace).assessable).toBe(false);
+  });
+
+  it("withholds projected metrics when an arm segment collapses in the image", () => {
+    const collapsed = frame(0);
+    collapsed.landmarks[JOINT.rightElbow] = {
+      ...collapsed.landmarks[JOINT.rightShoulder],
+    };
+    // Predicted world-space positions cannot rescue absent projected evidence.
+    collapsed.worldLandmarks = frame(0, 1, "right").landmarks;
+    expect(assessArmTracking(collapsed)).toMatchObject({
+      left: { assessable: true, status: "tracking" },
+      right: {
+        assessable: false,
+        status: "foreshortened",
+        projectedAngle: null,
+        projectedReach: null,
+      },
+    });
+    const normal = frame(0, 0.7);
+    expect(assessArmTracking(normal).left.projectedAngle).toBeCloseTo(
+      armGeometry(normal, "left").angle,
+    );
+    expect(assessArmTracking(normal).left.projectedReach).toBeCloseTo(
+      armGeometry(normal, "left").reach,
+    );
   });
 });
 
@@ -301,6 +366,52 @@ describe("conservative causal event detection", () => {
     frames[11].landmarks[JOINT.leftWrist].visibility = 0.1;
     expect(collect(detector, frames)).toEqual([]);
     expect(collect(detector, cycle(920))).toHaveLength(1);
+  });
+
+  it.each(["left", "right"] as const)(
+    "keeps a visible %s-arm movement when only the guarding arm disappears",
+    (hand) => {
+      const oppositeWrist =
+        hand === "left" ? JOINT.rightWrist : JOINT.leftWrist;
+      const oppositeElbow =
+        hand === "left" ? JOINT.rightElbow : JOINT.leftElbow;
+      const frames = cycle(0, hand);
+      // This fails the former all-joints gate during the outgoing and peak phase.
+      for (const value of frames.slice(7, 15)) {
+        value.landmarks[oppositeWrist].visibility = 0.61;
+        value.landmarks[oppositeElbow].visibility = 0.63;
+      }
+      const events = collect(engine(), frames);
+      expect(events).toHaveLength(1);
+      expect(events[0].hand).toBe(hand);
+      expect(events[0].label).toBe(hand === "left" ? "jab" : "cross");
+      // Opposite-arm uncertainty must not alter the visible movement's evidence.
+      expect(events).toEqual(collect(engine(), cycle(0, hand)));
+    },
+  );
+
+  it.each(["left", "right"] as const)(
+    "discards the %s-arm candidate if its own wrist is hidden and requires a fresh baseline",
+    (hand) => {
+      const detector = engine();
+      const frames = cycle(0, hand);
+      const wrist = hand === "left" ? JOINT.leftWrist : JOINT.rightWrist;
+      frames[11].landmarks[wrist].visibility = 0.1;
+      expect(assessQuality(frames[11]).assessable).toBe(true);
+      expect(collect(detector, frames)).toEqual([]);
+      expect(collect(detector, cycle(920, hand))).toHaveLength(1);
+    },
+  );
+
+  it("does not reinterpret collapsed active-arm projection as extension", () => {
+    const frames = cycle(0, "right");
+    for (const value of frames.slice(7, 15)) {
+      value.worldLandmarks = value.landmarks.map((point) => ({ ...point }));
+      value.landmarks[JOINT.rightWrist] = {
+        ...value.landmarks[JOINT.rightElbow],
+      };
+    }
+    expect(collect(engine(), frames)).toEqual([]);
   });
 
   it("requires a new resting baseline after image aspect changes", () => {

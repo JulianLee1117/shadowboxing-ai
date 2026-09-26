@@ -74,6 +74,7 @@ export interface Session {
   schemaVersion: "1.0";
   annotationsComplete?: boolean;
   modelManifest?: unknown;
+  detectorVersion?: string;
   capture?: {
     width: number;
     height: number;

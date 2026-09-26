@@ -9,7 +9,7 @@ import type {
   Stance,
 } from "../lib/types";
 import { VisionRunner } from "../lib/vision";
-import { MotionEngine, assessQuality } from "../lib/motion";
+import { MotionEngine, assessQuality, DETECTOR_VERSION } from "../lib/motion";
 import { demoFrame } from "../lib/demo";
 import { percentile } from "../lib/storage";
 import modelManifest from "../../model-manifest.json";
@@ -31,6 +31,7 @@ interface RoundConfig {
 interface RoundData {
   config: RoundConfig;
   start: number;
+  startedAt: number; // monotonic wall time; capture deadlines do not depend on pose
   frames: PoseFrame[];
   events: PunchEvent[];
   skipped: number;
@@ -119,6 +120,8 @@ export function useStudio(onComplete: (session: Session) => void) {
   const pendingFrame = useRef<Promise<void> | null>(null);
   const closingAt = useRef<number | null>(null);
   const round = useRef<RoundData | null>(null);
+  const roundDeadline = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const elapsedClock = useRef<ReturnType<typeof setInterval> | null>(null);
   const engine = useRef(
     new MotionEngine({ stance: "orthodox", calibrated: false }),
   );
@@ -140,19 +143,30 @@ export function useStudio(onComplete: (session: Session) => void) {
   const [skipped, setSkipped] = useState(0);
   const recentTimes = useRef<number[]>([]);
 
+  const clearRoundClock = useCallback(() => {
+    if (roundDeadline.current !== null) clearTimeout(roundDeadline.current);
+    if (elapsedClock.current !== null) clearInterval(elapsedClock.current);
+    roundDeadline.current = null;
+    elapsedClock.current = null;
+  }, []);
+
   const finishRound = useCallback((): Promise<void> => {
     if (finalizing.current) return finalizing.current;
     const data = round.current;
     if (!data) return Promise.resolve();
+    clearRoundClock();
     const endSource =
       data.source === "demo"
         ? performance.now() - sourceStart.current
         : (videoRef.current?.currentTime ?? lastSource.current / 1000) * 1000;
     const durationMs = Math.max(
       0,
-      endSource - data.start,
+      data.source === "file"
+        ? endSource - data.start
+        : performance.now() - data.startedAt,
       data.frames.at(-1)?.t ?? 0,
     );
+    if (mounted.current) setElapsed(durationMs);
     const originalFile = sourceFile.current;
     closingAt.current = endSource;
     if (data.source === "file") videoRef.current?.pause();
@@ -217,6 +231,7 @@ export function useStudio(onComplete: (session: Session) => void) {
         ),
         skippedFrames: data.skipped,
         modelManifest,
+        detectorVersion: DETECTOR_VERSION,
         capture: data.capture,
       };
       complete.current(session);
@@ -227,12 +242,13 @@ export function useStudio(onComplete: (session: Session) => void) {
     });
     finalizing.current = task;
     return task;
-  }, []);
+  }, [clearRoundClock]);
   const finishRef = useRef(finishRound);
   finishRef.current = finishRound;
 
   const releaseSource = useCallback(() => {
     generation.current++;
+    clearRoundClock();
     cancelAnimationFrame(raf.current);
     runner.current?.dispose();
     runner.current = null;
@@ -264,7 +280,7 @@ export function useStudio(onComplete: (session: Session) => void) {
       setSettings(null);
       setFps(0);
     }
-  }, []);
+  }, [clearRoundClock]);
 
   const stop = useCallback(async () => {
     const pending = finishRound();
@@ -294,6 +310,7 @@ export function useStudio(onComplete: (session: Session) => void) {
         setEvents([...data.events]);
       }
       if (
+        data.source === "file" &&
         closingAt.current === null &&
         analyzed.t >= data.config.durationSeconds * 1000
       )
@@ -310,7 +327,7 @@ export function useStudio(onComplete: (session: Session) => void) {
           : 0,
       );
       if (data) {
-        setElapsed(analyzed.t);
+        if (data.source === "file") setElapsed(analyzed.t);
         setSkipped(data.skipped);
       }
     }
@@ -387,7 +404,12 @@ export function useStudio(onComplete: (session: Session) => void) {
 
   const start = useCallback(
     async (kind: SourceKind, variant: ModelVariant, file?: File) => {
-      await stop();
+      // stop() invalidates older requests synchronously. Capture that generation
+      // before awaiting, so a newer start/stop cannot revive this request.
+      const pendingStop = stop();
+      const gen = generation.current;
+      await pendingStop;
+      if (gen !== generation.current || !mounted.current) return;
       setError(null);
       setStatus("loading");
       setEvents([]);
@@ -396,7 +418,6 @@ export function useStudio(onComplete: (session: Session) => void) {
       sourceRef.current = kind;
       setSource(kind);
       variantRef.current = variant;
-      const gen = generation.current;
       try {
         const video = videoRef.current;
         if (!video) throw new Error("Video surface is not available.");
@@ -452,6 +473,7 @@ export function useStudio(onComplete: (session: Session) => void) {
           setQuality(assessQuality(warmup));
         } else {
           await video.play();
+          if (gen !== generation.current) return;
           await vision.init();
           if (gen !== generation.current) return;
         }
@@ -534,6 +556,7 @@ export function useStudio(onComplete: (session: Session) => void) {
       round.current = {
         config,
         start,
+        startedAt: performance.now(),
         frames: [],
         events: [],
         skipped: 0,
@@ -581,20 +604,49 @@ export function useStudio(onComplete: (session: Session) => void) {
           );
         }
       }
-      if (kind === "file")
-        void videoRef.current
-          ?.play()
-          .catch(() =>
-            setError(
-              "Could not play this video format. Try an MP4 or WebM file.",
+      const data = round.current;
+      const gen = generation.current;
+      if (kind === "file") {
+        void videoRef.current?.play().catch(() => {
+          if (gen !== generation.current || round.current !== data) return;
+          setError(
+            "Could not play this video format. Try an MP4 or WebM file.",
+          );
+          void stop();
+        });
+      } else {
+        // Recording duration and its clock remain reliable when pose inference
+        // is slow or camera-frame callbacks temporarily stop arriving.
+        clearRoundClock();
+        const durationMs = config.durationSeconds * 1000;
+        elapsedClock.current = setInterval(() => {
+          if (
+            gen !== generation.current ||
+            round.current !== data ||
+            closingAt.current !== null
+          )
+            return;
+          setElapsed(
+            Math.min(
+              durationMs,
+              Math.max(0, performance.now() - data.startedAt),
             ),
           );
+        }, 100);
+        roundDeadline.current = setTimeout(
+          () => {
+            if (gen === generation.current && round.current === data)
+              void finishRef.current();
+          },
+          Math.max(0, durationMs - (performance.now() - data.startedAt)),
+        );
+      }
       setEvents([]);
       setElapsed(0);
       setSkipped(0);
       setRunning(true);
     },
-    [status, loop, releaseSource],
+    [status, loop, releaseSource, clearRoundClock, stop],
   );
 
   useEffect(() => {

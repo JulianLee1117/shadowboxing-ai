@@ -1,44 +1,45 @@
-# First test: about five minutes
+# Next test: two 30-second rounds
 
-This checks camera setup, experimental punch detection, and replay. We are not evaluating technique critique yet. Missed detections do not mean your technique is wrong.
+This checks hand identity before punch counts. A pose model may place the R wrist on the physical left hand; landmarks alone cannot establish whether lighting, occlusion or another model error caused it. High visibility confidence can still accompany incorrect tracking.
 
-## 1. Set up
+## Keep the lead hand unchanged
 
-Open **Training studio → Practice**, leave **Free practice** and the **1-minute** duration selected, then click **Enable camera**. Choose your stance: orthodox means your left hand leads; southpaw means your right hand leads.
+Open [Practice](http://127.0.0.1:5173), choose your usual **Lead hand**, and leave the round at **30 seconds**. Use that same lead-hand selection and boxing stance for both rounds. Change your body's angle relative to the camera; do not switch stance just because you turn.
 
-Keep your head, hips, elbows, and hands visible, including your full reach. Raise your physical left hand and confirm that the overlay’s **L** follows it, even with a mirrored preview. Confirm the checkbox, then click **Use this setup**.
+- **Round A:** start with the preferred opposite view. Use a comfortable three-quarter angle that keeps both arms visible; do not turn your back to the camera.
+- **Round B:** repeat from the original view for comparison.
 
-Turn on **Save round video** for this test so you can inspect the actual recording. It stays on this device. Leave **More options** alone.
+For each round, click **Enable camera**, then **Record round**. You have **8 seconds** to step back. Recording starts automatically even if L / R tracking is uncertain. Video and tracking stay local, with no microphone.
 
-## 2. Perform one short round
+## Repeat the same sequence
 
-Click **Start round**:
+Once recording starts:
 
-1. Hold your guard without punching for **10 seconds**. Target: no punch detections.
-2. Throw **5 comfortable jabs**.
-3. Throw **5 comfortable crosses**.
-4. Throw **3 jab–cross combinations**.
+1. Raise your **physical left hand** for about one second, then your **physical right hand** for about one second.
+2. Settle into your usual guard.
+3. Throw **5 slow, comfortable jabs**, with a brief reset between punches.
+4. Throw **5 slow, comfortable crosses**, with a brief reset between punches.
+5. Relax for any remaining time.
 
-Pause about two seconds between repetitions or combinations. Keep your normal technique; do not change it just to make the counter respond. Click **Finish round** when done, or let the timer finish.
+Keep your normal punch path; do not stretch to satisfy the counter. Note how many punches you actually complete if time runs out.
 
-Target: **8 jabs and 8 crosses**, matching your performed punches. Detection accuracy remains unverified.
+## Compare video with tracking
 
-## 3. Check the result
+When each round finishes, **Review** opens and the camera is released. Confirm **Saved on this device** and that the webcam indicator turns off. For Round B, choose **New round** and repeat without changing **Lead hand**.
 
-Confirm the round saved locally. Click **Stop camera** and verify that the webcam indicator turns off. Open **Round review**, select the round, and use **Show experimental detections** to inspect its counts and events.
+Watch the original video first, then enable **Show tracking**. During the opening hand raises, check whether L follows the physical left hand and R the physical right. During crosses, check whether R follows the correct wrist, stays near the other hand, or disappears. Then enable **Show detections** and compare counts with what the video shows. Tracking confidence and the skeleton alone cannot establish correctness.
 
-Play and scrub the video. Check that the skeleton follows the visible movement and disappears when tracking has a substantial gap.
-
-Only if punches toward the camera hide an arm, repeat from a slightly angled position with both hands visible. Report the two views separately.
+Under **Export & details**, preserve both **Evidence JSON** and **Export video** for each round. JSON does not include the footage. Keep the two views separate.
 
 ## Report back
 
 ```text
-Stance and camera angle:
-Detected jabs / crosses: __ / __ (performed 8 / 8)
-False detections during the first 10 seconds:
-Left/right labels correct? Any tracking loss or noticeable lag?
-Video saved and replay aligned?
-Camera indicator off after Stop camera?
-One confusing or broken thing:
+Lead hand (same in both rounds):
+Round A, opposite view — actual jabs/crosses: __/__ ; detected: __/__
+Round B, original view — actual jabs/crosses: __/__ ; detected: __/__
+Does L/R follow the correct physical hand in each view?
+During crosses, does R follow the other hand, stay bent, or disappear?
+Both videos saved, replay aligned, and camera off afterward?
 ```
+
+The coupling bug between arms is fixed, but cross recognition remains unresolved. These two recorded views are a diagnostic comparison, not an accuracy validation.

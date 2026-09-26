@@ -66,6 +66,56 @@ test.describe("actual local MediaPipe runtime", () => {
     expect(externalRequests(requests)).toEqual([]);
   });
 
+  test("rejected imported playback stops cleanly and preserves the original video", async ({
+    page,
+  }) => {
+    await forceCpuFallback(page);
+    await page.goto(appUrl);
+    const recording = await recordSyntheticVideo(page);
+    const original = Buffer.from(recording.bytes);
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "rejected-playback.webm",
+      mimeType: recording.mimeType,
+      buffer: original,
+    });
+    const analyze = page.getByRole("button", {
+      name: "Analyze clip",
+      exact: true,
+    });
+    await expect(analyze).toBeEnabled({ timeout: 45_000 });
+    const capture = page.locator(".camera-stage video");
+    await capture.evaluate((video: HTMLVideoElement) => {
+      video.play = () =>
+        Promise.reject(
+          new DOMException("Injected playback rejection.", "NotAllowedError"),
+        );
+    });
+    await analyze.click();
+    await expect(page.getByRole("alert")).toContainText(
+      "Could not play this video format",
+    );
+    await expect(
+      page.getByRole("heading", { name: "Review", exact: true }),
+    ).toBeVisible();
+    await expect(capture).toHaveJSProperty("srcObject", null);
+    await expect(capture).not.toHaveAttribute("src", /.+/);
+    await expect(
+      page.getByRole("button", { name: "Stop & save", exact: true }),
+    ).toHaveCount(0);
+    await expect
+      .poll(async () => (await savedSessionSummaries(page)).length)
+      .toBe(1);
+    const [saved] = await savedSessionSummaries(page);
+    expect(saved.source).toBe("file");
+    expect(saved.videoBytes).toBe(original.byteLength);
+    expect(saved.times).toEqual([]);
+    await page.getByRole("button", { name: "Practice", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Enable camera", exact: true }),
+    ).toBeVisible();
+    await expect(analyze).toHaveCount(0);
+  });
+
   test("analyzes an uploaded synthetic video twice and preserves the original video export", async ({
     page,
   }) => {
@@ -79,36 +129,47 @@ test.describe("actual local MediaPipe runtime", () => {
     const original = Buffer.from(recording.bytes);
     expect(original.byteLength).toBeGreaterThan(1000);
 
-    // The hidden file input is the real user-facing import path. No getUserMedia
-    // or camera permissions are used, even while creating this fixture.
-    await page.locator('input[type="file"]').setInputFiles({
-      name: "synthetic-motion.webm",
-      mimeType: recording.mimeType,
-      buffer: original,
-    });
-    const analyze = page.getByRole("button", {
-      name: "Analyze clip",
-      exact: true,
-    });
-    await expect(analyze).toBeEnabled({ timeout: 45_000 });
-    await expect(
-      page.getByText("Imported clip stays local", { exact: false }),
-    ).toBeVisible();
-
     for (let completed = 1; completed <= 2; completed++) {
+      if (completed > 1)
+        await page
+          .getByRole("button", { name: "Practice", exact: true })
+          .click();
+      // Each completed round releases its source. Import the same original
+      // again to exercise a fresh worker and a fresh media-time origin.
+      // This canvas fixture never requests getUserMedia or camera permission.
+      await page.locator('input[type="file"]').setInputFiles({
+        name: "synthetic-motion.webm",
+        mimeType: recording.mimeType,
+        buffer: original,
+      });
+      const analyze = page.getByRole("button", {
+        name: "Analyze clip",
+        exact: true,
+      });
+      await expect(analyze).toBeEnabled({ timeout: 45_000 });
+      await expect(
+        page.getByText("Imported clip stays local", { exact: false }),
+      ).toBeVisible();
       await analyze.click();
       await expect(
-        page.getByRole("button", { name: "Finish round", exact: true }),
+        page.getByRole("button", { name: "Stop & save", exact: true }),
       ).toBeVisible({ timeout: 45_000 });
-      // Completion must be automatic at the uploaded clip's end, not a manual
-      // Finish click or the one-minute default round timer.
+      // Completion and Review must happen at the clip's end without another
+      // click, rather than waiting for the 30-second camera-round timer.
       await expect(
-        page.getByRole("button", { name: "Review round", exact: false }),
+        page.getByRole("heading", { name: "Review", exact: true }),
       ).toBeVisible({ timeout: 15_000 });
       await expect
         .poll(async () => (await savedSessionSummaries(page)).length)
         .toBe(completed);
-      await expect(analyze).toBeEnabled();
+      await expect(page.locator(".camera-stage video")).toHaveJSProperty(
+        "srcObject",
+        null,
+      );
+      await expect(page.locator(".camera-stage video")).not.toHaveAttribute(
+        "src",
+        /.+/,
+      );
     }
 
     const saved = await savedSessionSummaries(page);
@@ -142,9 +203,6 @@ test.describe("actual local MediaPipe runtime", () => {
       expect(session.finiteTimings).toBe(true);
     }
 
-    await page
-      .getByRole("button", { name: "Review round", exact: false })
-      .click();
     await expect(page.getByRole("heading", { name: "Review" })).toBeVisible();
     const replay = page.locator(".replay-stage video");
     await expect(replay).toBeVisible();
@@ -155,6 +213,7 @@ test.describe("actual local MediaPipe runtime", () => {
       )
       .toBeGreaterThanOrEqual(1);
 
+    await page.getByText("Export & details", { exact: true }).click();
     const evidenceDownload = page.waitForEvent("download");
     await page
       .getByRole("button", { name: "Evidence JSON", exact: true })
@@ -174,6 +233,7 @@ test.describe("actual local MediaPipe runtime", () => {
       true,
     );
 
+    page.once("dialog", (dialog) => dialog.accept());
     await page
       .getByRole("button", { name: "Delete this round", exact: true })
       .click();

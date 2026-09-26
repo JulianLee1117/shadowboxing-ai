@@ -12,6 +12,20 @@ import {
 type Hand = PunchEvent["hand"];
 type Point = { x: number; y: number };
 
+/** Include in saved evidence so replays can identify the counting rules used. */
+export const DETECTOR_VERSION = "projected-straight-v2-per-arm";
+
+export interface ArmTrackingState {
+  hand: Hand;
+  assessable: boolean;
+  status: "tracking" | "hidden" | "foreshortened" | "invalid";
+  reason: string | null;
+  /** Image-space estimates only; neither metric establishes physical extension. */
+  projectedAngle: number | null;
+  projectedReach: number | null;
+  minimumVisibility: number | null;
+}
+
 /** Experimental image-space thresholds, not a validated boxing rubric. */
 export const MOTION_LIMITS = {
   minimumVisibility: 0.65,
@@ -25,16 +39,18 @@ export const MOTION_LIMITS = {
   minimumRecoveryMs: 30,
 } as const;
 
-const REQUIRED_JOINTS = [
-  JOINT.nose,
+const TORSO_JOINTS = [
   JOINT.leftShoulder,
   JOINT.rightShoulder,
+  JOINT.leftHip,
+  JOINT.rightHip,
+];
+const REQUIRED_JOINTS = [
+  ...TORSO_JOINTS,
   JOINT.leftElbow,
   JOINT.rightElbow,
   JOINT.leftWrist,
   JOINT.rightWrist,
-  JOINT.leftHip,
-  JOINT.rightHip,
 ];
 
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -105,11 +121,7 @@ function torsoScale(frame: PoseFrame): number {
   );
 }
 
-/** Upper-body acquisition gate only; assessable does not mean correct technique. */
-export function assessQuality(frame: PoseFrame): QualityState {
-  const visibleJoints = REQUIRED_JOINTS.filter((index) =>
-    visible(frame.landmarks[index]),
-  ).length;
+function sharedTrackingReasons(frame: PoseFrame): string[] {
   const reasons: string[] = [];
   if (!Number.isFinite(frame.t) || frame.t < 0)
     reasons.push("Frame time is invalid.");
@@ -121,42 +133,110 @@ export function assessQuality(frame: PoseFrame): QualityState {
   ) {
     reasons.push("Image dimensions are invalid.");
   }
-  if (visibleJoints < REQUIRED_JOINTS.length) {
+  if (!TORSO_JOINTS.every((index) => visible(frame.landmarks[index]))) {
     reasons.push(
-      "Keep your face, shoulders, elbows, wrists, and hips visible inside the frame.",
+      "Keep both shoulders and hips visible inside the frame to measure arm motion.",
     );
   }
   if (reasons.length === 0) {
     const scale = torsoScale(frame);
     if (scale < 0.08)
       reasons.push("Move closer so your upper body is large enough to track.");
-    for (const hand of ["left", "right"] as const) {
-      const shoulder =
-        frame.landmarks[
-          hand === "left" ? JOINT.leftShoulder : JOINT.rightShoulder
-        ];
-      const elbow =
-        frame.landmarks[hand === "left" ? JOINT.leftElbow : JOINT.rightElbow];
-      const wrist =
-        frame.landmarks[hand === "left" ? JOINT.leftWrist : JOINT.rightWrist];
-      if (
-        imageDistance(shoulder, elbow, frame.width, frame.height) < 0.01 ||
-        imageDistance(elbow, wrist, frame.width, frame.height) < 0.01
-      ) {
-        reasons.push(
-          "An arm is too foreshortened or uncertain in this view. Try a slight turn.",
-        );
-        break;
-      }
-    }
   }
+  return reasons;
+}
+
+/**
+ * Independent arm observability. A hidden guarding hand must not erase the
+ * opposite arm's evidence. Both shoulders/hips remain necessary for torso scale.
+ * Predicted depth is deliberately not substituted for missing image evidence.
+ */
+export function assessArmTracking(
+  frame: PoseFrame,
+): Record<Hand, ArmTrackingState> {
+  const sharedReasons = sharedTrackingReasons(frame);
+  const assess = (hand: Hand): ArmTrackingState => {
+    const indices =
+      hand === "left"
+        ? [JOINT.leftShoulder, JOINT.leftElbow, JOINT.leftWrist]
+        : [JOINT.rightShoulder, JOINT.rightElbow, JOINT.rightWrist];
+    const points = indices.map((index) => frame.landmarks[index]);
+    const minimumVisibility = points.every((point) =>
+      Number.isFinite(point?.visibility),
+    )
+      ? Math.min(...points.map((point) => point!.visibility!))
+      : null;
+    const base: ArmTrackingState = {
+      hand,
+      assessable: false,
+      status: "invalid",
+      reason: null,
+      projectedAngle: null,
+      projectedReach: null,
+      minimumVisibility,
+    };
+    if (sharedReasons.length)
+      return { ...base, reason: sharedReasons.join(" ") };
+    if (!points.every(visible)) {
+      return {
+        ...base,
+        status: "hidden",
+        reason: `Your ${hand} elbow or wrist is outside the frame or not reliably visible.`,
+      };
+    }
+    const [shoulder, elbow, wrist] = points;
+    if (
+      imageDistance(shoulder, elbow, frame.width, frame.height) < 0.01 ||
+      imageDistance(elbow, wrist, frame.width, frame.height) < 0.01
+    ) {
+      return {
+        ...base,
+        status: "foreshortened",
+        reason: `Your ${hand} arm segments overlap or are too small in this view. Try a slight turn.`,
+      };
+    }
+    const geometry = armGeometry(frame, hand);
+    return {
+      ...base,
+      assessable: true,
+      status: "tracking",
+      projectedAngle: geometry.angle,
+      projectedReach: geometry.reach,
+    };
+  };
+  return { left: assess("left"), right: assess("right") };
+}
+
+function trackingQuality(
+  frame: PoseFrame,
+  arms: Record<Hand, ArmTrackingState>,
+): QualityState {
+  const assessable = arms.left.assessable || arms.right.assessable;
   return {
-    assessable: reasons.length === 0,
-    label: reasons.length ? "Tracking unavailable" : "Upper body visible",
-    reasons,
-    visibleJoints,
+    assessable,
+    label:
+      arms.left.assessable && arms.right.assessable
+        ? "Both arms visible"
+        : assessable
+          ? `${arms.left.assessable ? "Left" : "Right"} arm visible`
+          : "Tracking unavailable",
+    reasons: Array.from(
+      new Set(
+        [arms.left.reason, arms.right.reason].filter(
+          (reason): reason is string => reason !== null,
+        ),
+      ),
+    ),
+    visibleJoints: REQUIRED_JOINTS.filter((index) =>
+      visible(frame.landmarks[index]),
+    ).length,
     totalJoints: REQUIRED_JOINTS.length,
   };
+}
+
+/** At least one arm is observable; this does not mean correct technique. */
+export function assessQuality(frame: PoseFrame): QualityState {
+  return trackingQuality(frame, assessArmTracking(frame));
 }
 
 interface ArmSample {
@@ -248,7 +328,8 @@ export class MotionEngine {
   }
 
   update(frame: PoseFrame): EngineResult {
-    let quality = assessQuality(frame);
+    const armTracking = assessArmTracking(frame);
+    let quality = trackingQuality(frame, armTracking);
     if (!this.options.calibrated) {
       quality = {
         ...quality,
@@ -298,6 +379,11 @@ export class MotionEngine {
     this.lastAspect = aspect;
     const events: PunchEvent[] = [];
     for (const hand of ["left", "right"] as const) {
+      if (!armTracking[hand].assessable) {
+        // Never bridge missing active-arm evidence or reuse its stale baseline.
+        this.arms[hand] = freshArm();
+        continue;
+      }
       const event = this.updateArm(hand, armGeometry(frame, hand));
       if (event) events.push(event);
     }
