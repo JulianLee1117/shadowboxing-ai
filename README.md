@@ -36,7 +36,7 @@ Older motion-only rounds remain available in **Saved rounds**. Updates preserve 
 
 Independent arm gating prevents an uncertain guarding hand from resetting the opposite arm's detector. Cross recognition remains unvalidated: an incorrectly tracked wrist or a foreshortened view can still fail the projected-motion checks. A high visibility score does not guarantee the correct hand was located.
 
-The detector now checks the outward path separately from recovery, accepts a brief observed peak only with supporting neighboring frames, and reuses a confirmed return for the next stroke. The next test checks separated punches, comfortable faster pairs, double jabs and idle movement in a fresh recording. See [the implementation ledger](docs/implementation-status.md).
+The detector checks the outward path separately from recovery, accepts a brief observed peak only with supporting neighboring frames, and acquires repeat starts from confirmed returns or observed flexed reversals. A bounded path check tolerates one isolated tracking detour without altering raw landmarks or peak evidence. Existing labeled rounds now support repeatable regression comparisons; fresh sessions are needed to evaluate a frozen version. See [the implementation ledger](docs/implementation-status.md) and [next iteration decisions](docs/iteration-plan.md).
 
 ## Implemented
 
@@ -45,7 +45,7 @@ The detector now checks the outward path separately from recovery, accepts a bri
 - An eight-second recording countdown, independent arm visibility checks, anatomical hand/lead mapping and experimental straight-punch events.
 - Local video and pose storage, automatic review, half-speed playback/stepping, versioned detection rechecks, reference labels, JSON/video export and per-round deletion.
 - Capture settings, actual delegate, timestamps, timing telemetry, model provenance and detector version in new exports.
-- Python tools for labeled event evaluation and separate pose diagnostics; an optional RTM extraction adapter whose real inference is still unverified on target footage.
+- Local replay and batch comparison tools, labeled event evaluation and separate pose diagnostics. Optional RTMPose/RTMW extraction has run on target footage and retains explicit model/preprocessing/runtime provenance; Full remains the live default.
 
 Hooks, uppercuts and other actions can be labeled manually but are not recognized by the live baseline. Front-facing punches and self-occlusion can defeat projected geometry. Heuristic scores are not calibrated confidence, and returning toward a starting position is not proof of correct guard recovery.
 
@@ -68,9 +68,13 @@ Automated browser tests use generated streams and stub physical camera requests.
 ```sh
 python3 -m ml.diagnose /path/to/session.json --output data/diagnosis.json
 python3 -m ml.evaluate /path/to/session.json --output data/evaluation.json
+npm run benchmark -- /path/to/day1-labeled.json /path/to/day2-labeled.json \
+  --output-dir data/pilot/runs/new-experiment
 ```
 
 `diagnose` reports per-arm visibility, projected geometry and timing, without claiming accuracy. Add `--include-timeline --window-ms 1000` for detailed tracking inspection. `evaluate` requires complete reference labels, or an explicit `--annotations-complete` assertion, for recognition metrics; otherwise it reports capture quality only. Both reject synthetic sessions unless `--allow-synthetic` is explicitly selected for software checks. See [benchmarking](docs/benchmarking.md) for matching rules and the optional RTM path.
+
+`benchmark` requires complete independent labels, preserves input sessions, refuses an existing output directory, and compares saved/current detections on unchanged poses. It reports recovered and lost reference actions as well as total matches and unmatched detections. This is a development regression check, not held-out accuracy or coaching validation.
 
 ## Project notes
 
