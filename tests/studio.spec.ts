@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import type { Session } from "../src/lib/types";
 import { demoFrame } from "../src/lib/demo";
+import { DETECTOR_VERSION } from "../src/lib/motion";
+import type { DetectorRecheckReport } from "../src/lib/recheck";
 
 const APP_ORIGIN = "http://127.0.0.1:5173";
 
@@ -833,6 +835,21 @@ test("retained-video replay bounds native seeking and hides pose samples across 
   });
   await expect(page.locator(".replay-stage .pose-overlay")).toHaveCount(1);
   await expect(page.getByRole("status")).toHaveCount(0);
+  const speed = page.getByLabel("Playback speed", { exact: true });
+  await expect(speed).toHaveValue("1");
+  await speed.selectOption("0.5");
+  await expect(video).toHaveJSProperty("playbackRate", 0.5);
+  await page.getByRole("button", { name: "Play replay", exact: true }).click();
+  await expect(video).toHaveJSProperty("paused", false);
+  await page
+    .getByRole("button", { name: "Previous frame", exact: true })
+    .click();
+  await expect(video).toHaveJSProperty("paused", true);
+  await expect(
+    page.getByRole("button", { name: "Play replay", exact: true }),
+  ).toBeVisible();
+  await speed.selectOption("1");
+  await expect(video).toHaveJSProperty("playbackRate", 1);
   expect(
     await page.evaluate(
       () =>
@@ -840,4 +857,233 @@ test("retained-video replay bounds native seeking and hides pose samples across 
           .length,
     ),
   ).toBe(0);
+});
+
+test("motion-only replay supports half speed and frame stepping pauses playback", async ({
+  page,
+}) => {
+  await denyPhysicalCamera(page);
+  await page.goto(APP_ORIGIN);
+  await page.evaluate(
+    async (frames) => {
+      const session: Session = {
+        id: "motion-speed-fixture",
+        createdAt: new Date().toISOString(),
+        source: "demo",
+        stance: "orthodox",
+        model: "synthetic",
+        drill: "open",
+        durationMs: 5000,
+        frames,
+        events: [],
+        annotations: [],
+        measuredFps: 10,
+        inferenceP95: 0,
+        skippedFrames: 0,
+        schemaVersion: "1.0",
+        annotationsComplete: false,
+      };
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("corner-local-v1", 1);
+        request.onupgradeneeded = () =>
+          request.result.createObjectStore("sessions", { keyPath: "id" });
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction("sessions", "readwrite");
+          const store = transaction.objectStore("sessions");
+          store.put(session);
+          store.put({
+            ...session,
+            id: "motion-speed-second",
+            createdAt: new Date(0).toISOString(),
+          });
+          transaction.oncomplete = () => {
+            database.close();
+            resolve();
+          };
+          transaction.onerror = transaction.onabort = () => {
+            database.close();
+            reject(transaction.error);
+          };
+        };
+      });
+    },
+    Array.from({ length: 51 }, (_, index) => demoFrame(index * 100)),
+  );
+  await page.reload();
+  await page.getByRole("button", { name: /^Saved rounds/ }).click();
+  await page.locator(".round-library .session-item").first().click();
+  await expect(page.locator(".replay-stage video")).toHaveCount(0);
+  const speed = page.getByLabel("Playback speed", { exact: true });
+  const position = page.getByLabel("Replay position", { exact: true });
+  await expect(speed).toHaveValue("1");
+  await speed.selectOption("0.5");
+  await page.clock.install();
+  await page.getByRole("button", { name: "Play replay", exact: true }).click();
+  await page.clock.runFor(1000);
+  const halfSpeedTime = Number(await position.inputValue());
+  expect(halfSpeedTime).toBeGreaterThanOrEqual(480);
+  expect(halfSpeedTime).toBeLessThanOrEqual(520);
+  await speed.selectOption("1");
+  await page.clock.runFor(1000);
+  const normalSpeedTime = Number(await position.inputValue());
+  expect(normalSpeedTime - halfSpeedTime).toBeGreaterThanOrEqual(960);
+  expect(normalSpeedTime - halfSpeedTime).toBeLessThanOrEqual(1040);
+  await page
+    .getByRole("button", { name: "Previous frame", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Play replay", exact: true }),
+  ).toBeVisible();
+  const pausedAt = await position.inputValue();
+  await page.clock.runFor(1000);
+  await expect(position).toHaveValue(pausedAt);
+  await speed.selectOption("0.5");
+  await page.locator(".round-library .session-item").last().click();
+  await expect(speed).toHaveValue("1");
+  await expect(position).toHaveValue("0");
+});
+
+test("detection recheck is temporary and exports separately from original evidence", async ({
+  page,
+}) => {
+  await denyPhysicalCamera(page);
+  await page.goto(APP_ORIGIN);
+  await page.evaluate(
+    async ({ frames, currentVersion }) => {
+      const original: Session = {
+        id: "recheck-original",
+        createdAt: new Date().toISOString(),
+        source: "demo",
+        stance: "orthodox",
+        model: "synthetic",
+        drill: "open",
+        durationMs: 6400,
+        frames,
+        events: [],
+        annotations: [],
+        measuredFps: 25,
+        inferenceP95: 0,
+        skippedFrames: 0,
+        schemaVersion: "1.0",
+        detectorVersion: "saved-older-detector",
+      };
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("corner-local-v1", 1);
+        request.onupgradeneeded = () =>
+          request.result.createObjectStore("sessions", { keyPath: "id" });
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction("sessions", "readwrite");
+          const store = transaction.objectStore("sessions");
+          store.put(original);
+          store.put({
+            ...original,
+            id: "already-current",
+            createdAt: new Date(0).toISOString(),
+            detectorVersion: currentVersion,
+          });
+          transaction.oncomplete = () => {
+            database.close();
+            resolve();
+          };
+          transaction.onerror = transaction.onabort = () => {
+            database.close();
+            reject(transaction.error);
+          };
+        };
+      });
+    },
+    {
+      frames: Array.from({ length: 161 }, (_, index) => demoFrame(index * 40)),
+      currentVersion: DETECTOR_VERSION,
+    },
+  );
+  await page.reload();
+  await page.getByRole("button", { name: /^Saved rounds/ }).click();
+  await page.locator(".round-library .session-item").first().click();
+  const original = await readExport(page);
+  expect(original.events).toEqual([]);
+  await page
+    .getByRole("checkbox", { name: "Show detections", exact: true })
+    .check();
+  await expect(page.locator(".detections h2")).toHaveText("0 jabs / 0 crosses");
+  await page
+    .getByRole("button", { name: "Recheck detections", exact: true })
+    .click();
+  await expect(
+    page.getByText("Updated analysis · Experimental", { exact: true }),
+  ).toBeVisible();
+  expect(await page.locator(".event-chip").count()).toBeGreaterThan(0);
+  await page.screenshot({
+    path: "artifacts/ui/recheck-desktop.png",
+    fullPage: true,
+  });
+  const downloading = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Export updated analysis", exact: true })
+    .click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe(
+    "corner-recheck-original-updated-analysis.json",
+  );
+  const report = JSON.parse(
+    await readFile((await download.path())!, "utf8"),
+  ) as DetectorRecheckReport;
+  expect(report).toMatchObject({
+    reportType: "detector-recheck",
+    sessionId: original.id,
+    detectorVersion: DETECTOR_VERSION,
+    sourceDetectorVersion: "saved-older-detector",
+    trackingSource: "saved-frames",
+    frameCount: original.frames.length,
+  });
+  expect(report.events.length).toBeGreaterThan(0);
+  expect(report).not.toHaveProperty("frames");
+  expect(report).not.toHaveProperty("video");
+  expect(await readExport(page)).toEqual(original);
+
+  await page
+    .getByRole("button", { name: "Use saved detections", exact: true })
+    .click();
+  await expect(page.locator(".detections h2")).toHaveText("0 jabs / 0 crosses");
+  await expect(
+    page.getByRole("button", { name: "Export updated analysis", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Recheck detections", exact: true })
+    .click();
+  await page.locator(".round-library .session-item").last().click();
+  await expect(
+    page.getByRole("button", { name: "Export updated analysis", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("checkbox", { name: "Show detections", exact: true }),
+  ).not.toBeChecked();
+  await page
+    .getByRole("checkbox", { name: "Show detections", exact: true })
+    .check();
+  await expect(
+    page.getByRole("button", { name: "Recheck detections", exact: true }),
+  ).toHaveCount(0);
+  await page.locator(".round-library .session-item").first().click();
+  await expect(
+    page.getByRole("checkbox", { name: "Show detections", exact: true }),
+  ).not.toBeChecked();
+  await page
+    .getByRole("checkbox", { name: "Show detections", exact: true })
+    .check();
+  await expect(
+    page.getByRole("button", { name: "Recheck detections", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".detections h2")).toHaveText("0 jabs / 0 crosses");
+
+  // Close the component and read the persisted session again: rechecks cannot
+  // silently rewrite original events or provenance in IndexedDB.
+  await page.reload();
+  await page.getByRole("button", { name: /^Saved rounds/ }).click();
+  await page.locator(".round-library .session-item").first().click();
+  expect(await readExport(page)).toEqual(original);
 });

@@ -13,7 +13,7 @@ type Hand = PunchEvent["hand"];
 type Point = { x: number; y: number };
 
 /** Include in saved evidence so replays can identify the counting rules used. */
-export const DETECTOR_VERSION = "projected-straight-v2-per-arm";
+export const DETECTOR_VERSION = "projected-straight-v3-causal-cycles";
 
 export interface ArmTrackingState {
   hand: Hand;
@@ -34,6 +34,7 @@ export const MOTION_LIMITS = {
   minimumRestFrames: 3,
   minimumExtension: 0.45,
   minimumPeakAngle: 145,
+  minimumPeakSupportFraction: 0.8,
   minimumEventMs: 180,
   maximumEventMs: 1800,
   minimumRecoveryMs: 30,
@@ -276,6 +277,9 @@ interface Candidate {
   peakWrist: Point;
   peakFrames: number;
   pathLength: number;
+  pathToPeak: number;
+  pendingPeak: { before: ArmSample; peak: ArmSample } | null;
+  supportedPeak: boolean;
   recovering: boolean;
   recoveryStartMs: number | null;
   recoveryFrames: number;
@@ -286,6 +290,7 @@ interface ArmState {
   rest: ArmSample | null;
   restStartMs: number;
   restFrames: number;
+  readyFromRecovery: boolean;
   candidate: Candidate | null;
 }
 
@@ -294,6 +299,7 @@ const freshArm = (): ArmState => ({
   rest: null,
   restStartMs: 0,
   restFrames: 0,
+  readyFromRecovery: false,
   candidate: null,
 });
 
@@ -405,8 +411,9 @@ export class MotionEngine {
     if (!candidate) {
       const ready =
         state.rest &&
-        state.restFrames >= MOTION_LIMITS.minimumRestFrames &&
-        previous.t - state.restStartMs >= MOTION_LIMITS.minimumRestMs;
+        (state.readyFromRecovery ||
+          (state.restFrames >= MOTION_LIMITS.minimumRestFrames &&
+            previous.t - state.restStartMs >= MOTION_LIMITS.minimumRestMs));
       if (
         ready &&
         sample.reach - state.rest!.reach > 0.18 &&
@@ -422,16 +429,31 @@ export class MotionEngine {
           peakWrist: sample.wrist,
           peakFrames: 0,
           pathLength: distance(state.rest!.wrist, sample.wrist),
+          pathToPeak: distance(state.rest!.wrist, sample.wrist),
+          pendingPeak: null,
+          supportedPeak: false,
           recovering: false,
           recoveryStartMs: null,
           recoveryFrames: 0,
         };
-        this.observePeak(state.candidate, sample);
+        this.observePeak(state.candidate, sample, previous);
         return null;
       }
-      // Rearm only from a flexed, quiet hand. An extended hand cannot generate
-      // repeated events, and every accepted event needs a new resting baseline.
+      // Maintain the acquired or confirmed-return reference in flexion. An
+      // extended hand cannot rearm, and outgoing motion must not drag the origin.
       if (ready) {
+        if (
+          state.readyFromRecovery &&
+          sample.angle <= 130 &&
+          sample.reach < state.rest!.reach &&
+          sample.angle <= state.rest!.angle
+        ) {
+          // Confirmation can occur before the hand has finished returning.
+          // Follow only observed inward motion with continued elbow flexion;
+          // freezing an early return would understate the next excursion.
+          state.rest = sample;
+          return null;
+        }
         if (
           sample.angle <= 130 &&
           distance(sample.wrist, state.rest!.wrist) <= 0.12
@@ -442,6 +464,7 @@ export class MotionEngine {
         } else if (sample.t - state.rest!.t > 350) {
           state.rest = null;
           state.restFrames = 0;
+          state.readyFromRecovery = false;
         }
         return null;
       }
@@ -457,6 +480,7 @@ export class MotionEngine {
       } else {
         state.rest = null;
         state.restFrames = 0;
+        state.readyFromRecovery = false;
       }
       return null;
     }
@@ -467,18 +491,20 @@ export class MotionEngine {
     }
     if (!candidate.recovering) {
       candidate.pathLength += distance(sample.wrist, previous.wrist);
-      this.observePeak(candidate, sample);
+      this.observePeak(candidate, sample, previous);
       if (
         candidate.peakReach - sample.reach > 0.14 &&
         sample.angle < candidate.peakAngle - 12
       ) {
-        if (candidate.peakFrames < 2) {
+        if (candidate.peakFrames < 2 && !candidate.supportedPeak) {
           this.arms[hand] = freshArm();
           return null;
         }
         const chord = distance(candidate.origin.wrist, candidate.peakWrist);
-        // Reject obvious arcs. Projected linearity is not proof of punch type.
-        if (chord < 0.35 || candidate.pathLength / chord > 1.65) {
+        // Compare the outward path with its outward chord. Including return
+        // travel here penalizes a straight punch simply for retracting quickly.
+        // Projected linearity is still not proof of punch type.
+        if (chord < 0.35 || candidate.pathToPeak / chord > 1.65) {
           this.arms[hand] = freshArm();
           return null;
         }
@@ -536,21 +562,68 @@ export class MotionEngine {
           : "not-observed",
       experimental: true,
     };
-    this.arms[hand] = freshArm();
+    // Confirmed return already separates two movements. Preserve its real last
+    // sample rather than discarding that evidence and forcing a fast double jab
+    // to wait for another three quiet frames. No extra frames/time are invented.
+    // Uncertain return or later occlusion still requires fresh acquisition.
+    this.arms[hand] =
+      event.guardReturn === "returned"
+        ? {
+            ...freshArm(),
+            previous: sample,
+            rest: sample,
+            restStartMs: sample.t,
+            restFrames: 1,
+            readyFromRecovery: true,
+          }
+        : freshArm();
     return event;
   }
 
-  private observePeak(candidate: Candidate, sample: ArmSample): void {
+  private observePeak(
+    candidate: Candidate,
+    sample: ArmSample,
+    previous: ArmSample,
+  ): void {
+    if (candidate.pendingPeak) {
+      const { before, peak } = candidate.pendingPeak;
+      const support = MOTION_LIMITS.minimumPeakSupportFraction;
+      const reachFloor =
+        candidate.origin.reach +
+        (peak.reach - candidate.origin.reach) * support;
+      const angleFloor =
+        candidate.origin.angle +
+        (peak.angle - candidate.origin.angle) * support;
+      // One observed strict peak can fall between two almost-extended samples.
+      // Require immediate observed neighbors on BOTH sides of that peak, each
+      // supporting its excursion and elbow opening. Never invent an unseen
+      // peak, or accept a lone baseline -> spike -> baseline jump.
+      if (
+        before.t < peak.t &&
+        peak.t < sample.t &&
+        before.reach < peak.reach &&
+        sample.reach < peak.reach &&
+        before.reach >= reachFloor &&
+        sample.reach >= reachFloor &&
+        before.angle >= angleFloor &&
+        sample.angle >= angleFloor
+      )
+        candidate.supportedPeak = true;
+      candidate.pendingPeak = null;
+    }
     if (sample.reach > candidate.peakReach) {
       candidate.peakReach = sample.reach;
       candidate.peakWrist = sample.wrist;
       candidate.peakMs = sample.t;
+      candidate.pathToPeak = candidate.pathLength;
     }
     candidate.peakAngle = Math.max(candidate.peakAngle, sample.angle);
     if (
       sample.reach - candidate.origin.reach >= MOTION_LIMITS.minimumExtension &&
       sample.angle >= MOTION_LIMITS.minimumPeakAngle
-    )
+    ) {
       candidate.peakFrames += 1;
+      candidate.pendingPeak = { before: previous, peak: sample };
+    }
   }
 }

@@ -1,6 +1,6 @@
 # Pose and motion perception research
 
-Research checked: **2026-09-26**. Initial target: the user's **M3 Max MacBook Pro with 36 GiB unified memory and built-in webcam**, personal use first, local live inference and optional cloud review of selected clips. Hardware was identified during planning; no camera capture, model installation, inference benchmark, or accuracy experiment has been performed.
+Research checked: **2026-09-26**. Initial target: the user's **M3 Max MacBook Pro with 36 GiB unified memory and built-in webcam**, personal use first, local live inference and optional cloud review of selected clips. This is the planning survey, written before implementation. Consult the [implementation ledger](../implementation-status.md) for current experiments and their limits; published model benchmarks below are not project measurements.
 
 This document distinguishes **source facts** from **engineering recommendations**. Published pose benchmarks establish candidate quality, not boxing-coaching accuracy. No reviewed model supplies a validated boxing critique engine out of the box.
 

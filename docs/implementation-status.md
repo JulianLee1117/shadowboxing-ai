@@ -8,7 +8,7 @@ Corner opens with its camera off. **Practice** defaults to a 30-second free-prac
 
 Camera rounds record video and tracking locally with no microphone. Completion opens **Review** and releases the capture source. A recording failure is reported and can leave a motion-only round. Imported clips retain the original file; **Analyze clip** starts analysis directly. **More options** contains the model selector, tracking display, countdown sound, video import and synthetic demo.
 
-Review opens original video without model overlays where footage is available. **Show tracking** and **Show detections** expose those layers separately. Reference labels, export and technical details are collapsed below playback. Earlier IndexedDB rounds, including motion-only captures, remain readable. Stored events are not recomputed when the detector changes; new sessions include a detector version.
+Review opens original video without model overlays where footage is available. **Show tracking** and **Show detections** expose those layers separately. Reference labels, export and technical details are collapsed below playback. Earlier IndexedDB rounds, including motion-only captures, remain readable. Stored events are not recomputed when the detector changes; new sessions include a detector version. Half-speed replay and frame stepping support inspection. Older rounds expose **Recheck detections** under **Show detections**: it runs the current counting rules over saved tracking, without rerunning pose or modifying the recording. Updated results are temporary and have a separate provenance-bearing export. **Use saved detections** restores the original view.
 
 MediaPipe inference runs in a module worker using local assets. The worker restricts fetch to same-origin because the SDK contains telemetry code; dev/preview servers add a restrictive CSP. No analytics or cloud-review service is connected.
 
@@ -20,11 +20,15 @@ The detector is an experimental projected extension/recovery heuristic, not a tr
 
 Arm observability is now independent: an uncertain guarding wrist no longer erases the opposite arm's history. Each arm still requires its own visible shoulder/elbow/wrist and shared shoulder/hip anchors for torso normalization. Timing gaps, invalid geometry and missing active-arm evidence still reset the relevant state. Tracking indicators describe observability, not correct technique. Predicted depth is not substituted for unavailable image evidence.
 
-A motion-only pilot exposed a coupling defect: opposite-arm confidence loss could reset an otherwise observable punching arm. Independent arm gating fixes that dependency, but does not establish accurate cross recognition. Projected reach and path checks can still reject a real cross when its wrist is tracked incorrectly. Thresholds were not tuned to the pilot.
+The current detector measures straightness only along the outward path to the observed peak. Including return travel in that ratio incorrectly penalized quick retractions. A single qualifying extension sample now requires coherent observed neighbors on both sides of the peak; it cannot pass as an isolated spike. An accepted event's confirmed return can establish readiness for the next stroke without imposing a second rest period. Initial acquisition, missing tracking, peak geometry and complete recovery remain guarded.
 
-No original video or independent action labels were available for that pilot. A pose model may place a wrist on the wrong physical hand even with high visibility confidence; landmarks alone cannot identify whether lighting, occlusion or another model failure caused that error. Recognition accuracy and technique cannot be established from such an export. Personal recordings, detailed pilot measurements and local diagnostic reports stay outside Git.
+Recorded development clips are reviewed independently of detection output to distinguish observable actions from tracking and counting failures. These clips guide changes, so before/after recovery is a development regression result, not held-out recognition accuracy. Provisional assistant action labels are not coach-verified form judgments. Personal recordings, detailed measurements, annotations and diagnostic reports stay outside Git.
 
-The next test is **two recorded 30-second rounds**, with the preferred opposite three-quarter view first and the original view second. Keep the same lead hand and stance while changing body angle. Start each round by raising the physical left hand, then right hand, followed by five slow jabs and five slow crosses with pauses. Compare actual video with the overlay to check hand identity before inspecting counts. This tests two views without assuming a lighting explanation; see [the short checklist](first-user-test.md).
+A controlled local Full/Heavy experiment used identical decoded frames and a fixed detector. Full remains the default after that development comparison. Re-encoded offline frames, initialization and headless timing differ from live camera capture; the experiment does not establish sustained latency or a universal model ranking. Artifacts and detailed measurements remain private.
+
+Projected geometry can still miss genuine punches because of foreshortening, short visible excursion or an incorrect wrist track. A pose model may place a wrist on the wrong physical hand even with high visibility confidence. Lighting and occlusion are possible contributors; the source video and tracking must be compared before assigning a cause. The current system does not repair hand swaps or infer invisible punch peaks.
+
+The next test uses a fresh round containing separated slow punches, comfortable faster pairs, a double-jab sequence and an idle interval. Maintain the same stance and a view with both arms visible; compare the original video before exposing detections. This checks generalization beyond the clips used for debugging. See [the short checklist](first-user-test.md).
 
 ## Timing and lifecycle
 
@@ -39,7 +43,7 @@ The next test is **two recorded 30-second rounds**, with the preferred opposite 
 
 ## Verification and diagnostic tools
 
-Unit tests cover aspect-correct geometry, anatomical hand mapping, temporal resets, independent-arm gating, missing active-arm evidence, synthetic demo behavior and countdown timing. Python tests cover one-to-one event matching, incomplete labels, synthetic exclusions, cross-model landmark mapping and per-arm diagnostics. Consult current test output for exact results.
+Unit tests cover aspect-correct geometry, anatomical hand mapping, temporal resets, independent-arm gating, observed peak support, quick repeat cycles, missing active-arm evidence, immutable rechecks, synthetic demo behavior and countdown timing. Python tests cover one-to-one event matching, incomplete labels, synthetic exclusions, cross-model landmark mapping and per-arm diagnostics. Consult current test output for exact results.
 
 Browser integration tests use generated streams and stub physical camera requests. They exercise local model inference, CPU fallback and capture/review/storage behavior. These establish software integration, not boxing accuracy. Earlier uploaded-video tests also checked repeated analysis, original-file retention and exported byte preservation against a production build; the simplified interface has its own regression checks.
 
@@ -48,7 +52,7 @@ Browser integration tests use generated streams and stub physical camera request
 ## Remaining evidence and features
 
 1. Capture original video across multiple days and views, including idle movement and natural transitions. Independently label all actions, physical hands and boundaries before revealing model suggestions.
-2. Separate pose-model failures from temporal-detector failures on the same labeled clips. Compare Full/Heavy and a provenance-audited RTM model before choosing a replacement.
+2. Separate pose-model failures from temporal-detector failures on the same labeled clips. Extend the initial Full/Heavy comparison to independent sessions and a provenance-audited RTM or body-guided hand model before choosing a replacement.
 3. Run sustained hardware testing. No 20-minute acceptance result is claimed.
 4. Train and evaluate a temporal classifier with sufficient data before expanding recognition to hooks, uppercuts and combinations. Heuristic scores remain uncalibrated.
 5. Obtain coach-reviewed criteria, examples and visibility rules before enabling corrective technique advice. No guard, power or biomechanics grades are provided.

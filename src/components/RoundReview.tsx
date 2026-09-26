@@ -9,7 +9,8 @@ import {
   X,
 } from "lucide-react";
 import { PoseOverlay } from "./PoseOverlay";
-import { assessArmTracking } from "../lib/motion";
+import { assessArmTracking, DETECTOR_VERSION } from "../lib/motion";
+import { recheckDetections, type DetectorRecheckReport } from "../lib/recheck";
 import {
   deleteSession,
   downloadBlob,
@@ -41,17 +42,35 @@ export function RoundReview({
 }: Props) {
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [overlay, setOverlay] = useState(false);
   const [showPredictions, setShowPredictions] = useState(false);
+  const [recheck, setRecheck] = useState<DetectorRecheckReport | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const offset = selected?.videoOffsetMs ?? 0;
   const duration = selected?.durationMs ?? 0;
   const sessionId = selected?.id;
   const videoBlob = selected?.video;
+  // The identity check also prevents stale results during a round-switch render.
+  const updated =
+    recheck &&
+    recheck.sessionId === sessionId &&
+    recheck.detectorVersion === DETECTOR_VERSION
+      ? recheck
+      : null;
+  const detectionEvents = updated?.events ?? selected?.events ?? [];
+  const jabCount = detectionEvents.filter(
+    (event) => event.label === "jab",
+  ).length;
+  const crossCount = detectionEvents.filter(
+    (event) => event.label === "cross",
+  ).length;
+  useEffect(() => setRecheck(null), [sessionId, DETECTOR_VERSION]);
   useEffect(() => {
     setTime(0);
     setPlaying(false);
+    setPlaybackRate(1);
     setOverlay(!videoBlob);
     setShowPredictions(false);
     if (!videoBlob) {
@@ -62,6 +81,9 @@ export function RoundReview({
     setVideoUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [sessionId, videoBlob]);
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = playbackRate;
+  }, [videoUrl, playbackRate]);
   const sync = useCallback(
     (video: HTMLVideoElement) => {
       const start = offset / 1000,
@@ -109,10 +131,10 @@ export function RoundReview({
       const now = performance.now(),
         delta = now - previous;
       previous = now;
-      setTime((current) => Math.min(duration, current + delta));
+      setTime((current) => Math.min(duration, current + delta * playbackRate));
     }, 33);
     return () => clearInterval(timer);
-  }, [playing, videoUrl, duration]);
+  }, [playing, videoUrl, duration, playbackRate]);
   useEffect(() => {
     if (time >= duration) setPlaying(false);
   }, [time, duration]);
@@ -300,6 +322,17 @@ export function RoundReview({
             <span>{formatTime(duration)}</span>
           </div>
           <div className="review-toggles">
+            <label>
+              Speed
+              <select
+                aria-label="Playback speed"
+                value={playbackRate}
+                onChange={(e) => setPlaybackRate(Number(e.target.value))}
+              >
+                <option value={0.5}>0.5×</option>
+                <option value={1}>1×</option>
+              </select>
+            </label>
             <label className="checkbox">
               <input
                 type="checkbox"
@@ -344,20 +377,34 @@ export function RoundReview({
             <div className="detections">
               <div className="detection-heading">
                 <h2>
-                  {selected.events.filter((e) => e.label === "jab").length} jabs{" "}
-                  <span>/</span>{" "}
-                  {selected.events.filter((e) => e.label === "cross").length}{" "}
-                  crosses
+                  {jabCount} {jabCount === 1 ? "jab" : "jabs"} <span>/</span>{" "}
+                  {crossCount} {crossCount === 1 ? "cross" : "crosses"}
                 </h2>
-                <span>Experimental</span>
+                <span>
+                  {updated ? "Updated analysis · Experimental" : "Experimental"}
+                </span>
               </div>
               <p>
                 These counts can miss punches or count other movement. Compare
                 with the video.
               </p>
+              {(updated || selected.detectorVersion !== DETECTOR_VERSION) && (
+                <>
+                  <button
+                    className="text-button"
+                    onClick={() =>
+                      setRecheck(updated ? null : recheckDetections(selected))
+                    }
+                    disabled={!updated && selected.frames.length === 0}
+                  >
+                    {updated ? "Use saved detections" : "Recheck detections"}
+                  </button>
+                  <p>Uses saved tracking; does not rerun pose.</p>
+                </>
+              )}
               <div className="event-timeline">
-                {selected.events.length ? (
-                  selected.events.map((event) => (
+                {detectionEvents.length ? (
+                  detectionEvents.map((event) => (
                     <button
                       key={event.id}
                       className={`event-chip ${event.label}`}
@@ -400,6 +447,22 @@ export function RoundReview({
                 <Download size={15} />
                 Evidence JSON
               </button>
+              {updated && (
+                <button
+                  className="button secondary"
+                  onClick={() =>
+                    downloadBlob(
+                      new Blob([JSON.stringify(updated)], {
+                        type: "application/json",
+                      }),
+                      `corner-${selected.id}-updated-analysis.json`,
+                    )
+                  }
+                >
+                  <Download size={15} />
+                  Export updated analysis
+                </button>
+              )}
               {selected.video && (
                 <button
                   className="button secondary"
@@ -422,6 +485,12 @@ export function RoundReview({
                 Delete this round
               </button>
             </div>
+            {updated && (
+              <p>
+                Updated analysis exports detections only. Evidence JSON keeps
+                the original saved results.
+              </p>
+            )}
             <dl className="technical-details">
               <div>
                 <dt>Model</dt>
@@ -445,9 +514,9 @@ export function RoundReview({
               </div>
             </dl>
             <p>
-              Exports contain this round’s original detections. Software updates
-              do not rewrite saved results. Local browser storage is not a
-              backup.
+              Evidence JSON contains this round’s original detections. Software
+              updates do not rewrite saved results. Local browser storage is not
+              a backup.
             </p>
           </details>
         </>

@@ -5,6 +5,7 @@ import {
   assessArmTracking,
   assessQuality,
   imageDistance,
+  MOTION_LIMITS,
   MotionEngine,
 } from "./motion";
 import { JOINT, type PoseFrame, type PunchEvent } from "./types";
@@ -57,6 +58,13 @@ function cycle(start = 0, hand: "left" | "right" = "left"): PoseFrame[] {
 const collect = (engine: MotionEngine, frames: PoseFrame[]): PunchEvent[] =>
   frames.flatMap((value) => engine.update(value).events);
 const engine = () => new MotionEngine({ stance: "orthodox", calibrated: true });
+
+// One strict extension sample, with near-peak evidence immediately before/after.
+// This is a state-machine fixture, not simulated training or an accuracy claim.
+const supportedPeak = [
+  0, 0, 0, 0, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.63, 0.7, 0.63, 0.6, 0.5, 0.4,
+  0.3, 0.2, 0.1, 0, 0, 0,
+];
 
 describe("upper-body acquisition quality", () => {
   it("reports each arm independently without substituting for a hidden wrist", () => {
@@ -210,6 +218,112 @@ describe("anatomical identity and projected geometry", () => {
 });
 
 describe("conservative causal event detection", () => {
+  it.each([15, 30, 60])(
+    "accepts one strict peak with observed outbound/inbound support at %i fps",
+    (fps) => {
+      for (const hand of ["left", "right"] as const) {
+        const frames = supportedPeak.map((p, i) =>
+          frame((i * 1000) / fps, p, hand),
+        );
+        const origin = armGeometry(frames[0], hand);
+        expect(
+          frames.filter((value) => {
+            const sample = armGeometry(value, hand);
+            return (
+              sample.reach - origin.reach >= MOTION_LIMITS.minimumExtension &&
+              sample.angle >= MOTION_LIMITS.minimumPeakAngle
+            );
+          }),
+        ).toHaveLength(1);
+        const events = collect(engine(), frames);
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({ hand, guardReturn: "returned" });
+        expect(events[0].peakMs).toBeLessThan(events[0].endMs);
+      }
+    },
+  );
+
+  it("requires support on both sides of a lone peak and never bridges an occluded neighbor", () => {
+    for (const unsupportedIndex of [11, 13]) {
+      const unsupported = supportedPeak.map((p, i) =>
+        frame(i * 40, i === unsupportedIndex ? 0.2 : p),
+      );
+      expect(collect(engine(), unsupported)).toEqual([]);
+      const hidden = supportedPeak.map((p, i) => frame(i * 40, p));
+      hidden[unsupportedIndex].landmarks[JOINT.leftWrist].visibility = 0.1;
+      expect(collect(engine(), hidden)).toEqual([]);
+    }
+  });
+
+  it.each([15, 24, 30, 60])(
+    "rejects short isolated spikes and subthreshold pulses across sample phases at %i fps",
+    (fps) => {
+      for (const phase of [0, 0.25, 0.5, 0.75]) {
+        for (const kind of ["spike", "partial"] as const) {
+          const frames = Array.from(
+            { length: Math.ceil(fps * 1.5) },
+            (_, i) => {
+              const t = ((i + phase) * 1000) / fps;
+              const p =
+                kind === "spike"
+                  ? t >= 700 && t <= 710
+                    ? 1
+                    : 0
+                  : Math.max(0, 0.63 * (1 - Math.abs(t - 750) / 250));
+              return frame(t, p);
+            },
+          );
+          expect(collect(engine(), frames)).toEqual([]);
+        }
+      }
+    },
+  );
+
+  it("measures straightness on the outward path even if elbow flexion lags retraction", () => {
+    const frames = cycle();
+    for (const value of frames.slice(13, 17)) {
+      const shoulder = value.landmarks[JOINT.leftShoulder];
+      const wrist = value.landmarks[JOINT.leftWrist];
+      value.landmarks[JOINT.leftElbow] = {
+        x: (shoulder.x + wrist.x) / 2,
+        y: (shoulder.y + wrist.y) / 2,
+        visibility: 0.99,
+      };
+    }
+    expect(collect(engine(), frames)).toHaveLength(1);
+  });
+
+  it("still rejects a visibly circuitous outward path with extended peak samples", () => {
+    const frames = Array.from({ length: 5 }, (_, i) => frame(i * 40));
+    for (const [x, y] of [
+      [0.2, 0.3],
+      [-0.2, 0.4],
+      [0.3, 0.6],
+      [0.8, 0],
+      [0.9, 0],
+      [0.9, 0],
+      [0.7, 0],
+      [0.4, 0],
+    ]) {
+      const value = frame(frames.length * 40);
+      const shoulder = value.landmarks[JOINT.leftShoulder];
+      const wrist = {
+        x: shoulder.x + (x * 0.37) / (1280 / 720),
+        y: shoulder.y + y * 0.37,
+        visibility: 0.99,
+      };
+      value.landmarks[JOINT.leftWrist] = wrist;
+      value.landmarks[JOINT.leftElbow] = {
+        x: (shoulder.x + wrist.x) / 2,
+        y: (shoulder.y + wrist.y) / 2,
+        visibility: 0.99,
+      };
+      frames.push(value);
+    }
+    for (let i = 0; i < 5; i++) frames.push(frame(frames.length * 40));
+    expect(collect(engine(), frames)).toEqual([]);
+  });
+
   it.each([30, 60])(
     "recognizes both physical hands in the UI demo at %i fps",
     (fps) => {
@@ -288,6 +402,75 @@ describe("conservative causal event detection", () => {
     ]);
     expect(events.map((event) => event.label)).toEqual(["jab", "jab", "cross"]);
     expect(new Set(events.map((event) => event.id)).size).toBe(3);
+  });
+
+  it.each([15, 30, 60])(
+    "uses a confirmed return to separate a quick jab-jab-cross at %i fps",
+    (fps) => {
+      const frames = [
+        ...cycle().slice(0, 20),
+        ...cycle().slice(5, 20),
+        ...cycle(0, "right").slice(5),
+      ].map((value, i) => ({ ...value, t: (i * 1000) / fps }));
+      const events = collect(engine(), frames);
+      expect(events.map((event) => event.label)).toEqual([
+        "jab",
+        "jab",
+        "cross",
+      ]);
+      expect(events.every((event) => event.guardReturn === "returned")).toBe(
+        true,
+      );
+      expect(events[1].startMs).toBeGreaterThanOrEqual(events[0].endMs);
+    },
+  );
+
+  it("clears recovery readiness after active-arm occlusion before a quick repeat", () => {
+    const frames = [...cycle().slice(0, 20), ...cycle().slice(5)].map(
+      (value, i) => ({ ...value, t: i * 40 }),
+    );
+    frames[20].landmarks[JOINT.leftWrist].visibility = 0.1;
+    expect(collect(engine(), frames)).toHaveLength(1);
+  });
+
+  it("follows a confirmed hand's continued inward return without following its next extension", () => {
+    const frames = [
+      ...cycle().slice(0, 20),
+      ...supportedPeak.slice(5).map((p) => frame(0, p)),
+    ].map((value, i) => {
+      // Preserve angles but use a smaller projected arm excursion. Freezing a
+      // partially returned reference would wrongly erase the next strict peak.
+      const shoulder = value.landmarks[JOINT.leftShoulder];
+      for (const joint of [JOINT.leftElbow, JOINT.leftWrist]) {
+        const point = value.landmarks[joint];
+        point.x = shoulder.x + (point.x - shoulder.x) * 0.55;
+        point.y = shoulder.y + (point.y - shoulder.y) * 0.55;
+      }
+      return { ...value, t: i * 40 };
+    });
+    const events = collect(engine(), frames);
+    expect(events).toHaveLength(2);
+    expect(events[1].extension).toBeCloseTo(
+      (armGeometry(frame(0, 0.7), "left").reach -
+        armGeometry(frame(0), "left").reach) *
+        0.55,
+    );
+    expect(events[1].extension).toBeGreaterThanOrEqual(
+      MOTION_LIMITS.minimumExtension,
+    );
+    expect(events[1].extension).toBeLessThan(0.5);
+  });
+
+  it("does not turn return jitter or a held extension into repeated events", () => {
+    for (const kind of ["jitter", "held"] as const) {
+      const frames = [
+        ...cycle().slice(0, 20),
+        ...Array.from({ length: 60 }, (_, i) =>
+          frame(800 + i * 40, kind === "held" ? 1 : i % 3 === 0 ? 0.15 : 0),
+        ),
+      ];
+      expect(collect(engine(), frames)).toHaveLength(1);
+    }
   });
 
   it("preserves the resting reference with smaller per-frame movement at higher cadence", () => {

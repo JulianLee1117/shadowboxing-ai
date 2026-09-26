@@ -26,30 +26,30 @@ Practice defaults to **30 seconds** of free practice with the left hand leading.
 2. Click **Record round** near the laptop, then step back. Recording starts automatically after **8 seconds**, even if tracking is uncertain. No second click or setup checkbox is required.
 3. Practice normally. **L / R** are predicted anatomical hand labels; check they follow your physical hands. Amber means uncertain tracking. Visibility alone does not verify hand identity or technique.
 4. Let the timer finish or click **Stop & save**. The app opens **Review** and releases the camera. Camera rounds save video and tracking locally; no microphone is requested.
-5. Watch the original video first. Use **Show tracking** and **Show detections** to inspect the model separately. Labels and **Export & details** are collapsed below replay.
+5. Watch the original video first. Use **0.5×** speed and frame stepping to inspect movement. **Show tracking** and **Show detections** expose the model separately. Labels and **Export & details** are collapsed below replay.
 
 **More options** contains tracking visibility, countdown sound, Full/Lite/Heavy models, **Open video**, and **Try demo**. Models can be changed while the source is off. Imported clips retain their original video locally; **Analyze clip** starts their analysis. The demo is synthetic and excluded from real accuracy reports.
 
-Older motion-only rounds remain available in **Saved rounds**. Updates preserve their original detections; a skeleton without source video cannot independently validate pose or punch accuracy. If the browser reports that recording is unavailable, that round may contain tracking only.
+Older motion-only rounds remain available in **Saved rounds**. Updates preserve their original detections. **Recheck detections** applies new counting rules to their saved tracking in memory; **Use saved detections** restores the original view. Updated analysis exports separately and does not rerun the pose model. A skeleton without source video cannot independently validate pose or punch accuracy. If the browser reports that recording is unavailable, that round may contain tracking only.
 
 ## Current recognition limitation
 
 Independent arm gating prevents an uncertain guarding hand from resetting the opposite arm's detector. Cross recognition remains unvalidated: an incorrectly tracked wrist or a foreshortened view can still fail the projected-motion checks. A high visibility score does not guarantee the correct hand was located.
 
-The next test records the same short sequence from two views, then compares actual video with the overlay before inspecting detections. This separates pose errors from detector rejection without assuming that lighting is the cause. See [the implementation ledger](docs/implementation-status.md).
+The detector now checks the outward path separately from recovery, accepts a brief observed peak only with supporting neighboring frames, and reuses a confirmed return for the next stroke. The next test checks separated punches, comfortable faster pairs, double jabs and idle movement in a fresh recording. See [the implementation ledger](docs/implementation-status.md).
 
 ## Implemented
 
 - Local MediaPipe Full/Lite/Heavy inference in a worker, one in-flight frame, timeouts and CPU fallback.
 - Same-origin assets, a worker network boundary blocking external SDK requests, and restrictive development/preview CSP headers.
 - An eight-second recording countdown, independent arm visibility checks, anatomical hand/lead mapping and experimental straight-punch events.
-- Local video and pose storage, automatic review, playback/stepping, reference labels, JSON/video export and per-round deletion.
+- Local video and pose storage, automatic review, half-speed playback/stepping, versioned detection rechecks, reference labels, JSON/video export and per-round deletion.
 - Capture settings, actual delegate, timestamps, timing telemetry, model provenance and detector version in new exports.
 - Python tools for labeled event evaluation and separate pose diagnostics; an optional RTM extraction adapter whose real inference is still unverified on target footage.
 
 Hooks, uppercuts and other actions can be labeled manually but are not recognized by the live baseline. Front-facing punches and self-occlusion can defeat projected geometry. Heuristic scores are not calibrated confidence, and returning toward a starting position is not proof of correct guard recovery.
 
-Cloud review is not connected and no API key is required. The app does not upload footage. Browser storage is not a backup: export video and JSON you want to preserve. Closing or reloading during an unfinished round can lose it. No sustained 20-minute acceptance test, model comparison on labeled boxing footage, or coach-reviewed efficacy result is claimed.
+Cloud review is not connected and no API key is required. The app does not upload footage. Browser storage is not a backup: export video and JSON you want to preserve. Closing or reloading during an unfinished round can lose it. No sustained 20-minute acceptance test, held-out recognition accuracy or coach-reviewed efficacy result is claimed.
 
 ## Verify
 
@@ -78,6 +78,7 @@ python3 -m ml.evaluate /path/to/session.json --output data/evaluation.json
 - [First sprint and completion ledger](docs/first-sprint.md)
 - [Implementation and validation status](docs/implementation-status.md)
 - [Pose research](docs/research/pose-models.md)
+- [Optimization sources and priorities](docs/research/optimization-update.md)
 - [Data and evaluation research](docs/research/data-and-evaluation.md)
 - [Coaching validity](docs/research/coaching-validity.md)
 - [Future video review layer](docs/research/video-review.md)
