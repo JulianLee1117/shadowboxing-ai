@@ -1,0 +1,85 @@
+# Offline benchmarking
+
+The evaluator is runnable with Python 3.10+ and the standard library. It reads the application's version `1.0` JSON session export. It does not upload video, download a model, or require a Python environment installation. Tests validate the scoring logic; no real-world boxing accuracy has been established.
+
+Run these commands from the repository root:
+
+```bash
+python3 -m unittest discover -s ml/tests -v
+python3 -m ml.evaluate /absolute/path/session.json --output /absolute/path/report.json
+```
+
+The second command always reports capture/inference diagnostics. Event accuracy is withheld unless `annotationsComplete` is explicitly `true` in the export, or the operator deliberately asserts completeness:
+
+```bash
+python3 -m ml.evaluate /absolute/path/day1.json /absolute/path/day2.json \
+  --annotations-complete --output /absolute/path/report.json
+```
+
+Annotate **every jab/cross throughout the full recording**, including missed detections, before asserting completeness. Do not annotate only the app's proposed punches. Remaining time is treated as negative/background evidence. Mark intervals that cannot be assessed as `unobservable`; use `other` for observable non-target movement. A few hand-picked examples cannot establish precision, recall, or false activations per minute. An empty but fully reviewed idle recording is valid; an unreviewed empty annotation array is not.
+
+## Matching and report semantics
+
+- Match exact technique label and anatomical `left`/`right` hand, with temporal intersection-over-union **at least 0.5**. The preview's mirror setting is irrelevant. A wrong label or wrong hand produces an unmatched prediction and a missed annotated event.
+- Use maximum-cardinality one-to-one bipartite matching. Descending IoU orders candidate edges, but the objective is the number of valid pairs, not the summed IoU. Duplicate detections cannot both match one punch.
+- Default recall scope is jab and cross. An annotated hook is outside this supported recall denominator, but an app-produced jab during that hook remains a false positive. `unsupportedTruthCount` makes omitted classes explicit. For a future model supporting more actions, use `--labels jab,cross,hook,uppercut` and freeze that protocol before testing.
+- Predictions fully contained in the union of `unobservable` intervals or target annotations with `hand: "unknown"` are excluded, with IDs and intervals listed. Excluded duration is subtracted from false-event exposure. A prediction crossing an exclusion boundary is still evaluated. Conflicting assessable truth/exclusion intervals cause a clear error requiring annotation adjudication.
+- Precision is TP/(TP+FP), recall TP/(TP+FN), and F1 2TP/(2TP+FP+FN). An undefined ratio is JSON `null`, not zero or perfect accuracy. Per-class counts, aggregate counts, per-session results and matched IDs are retained for inspection.
+- False events per minute is unmatched evaluated predictions divided by evaluated recording minutes. It is **not** false coaching cues per minute: cue scheduling and coach judgment require separate annotation.
+- Inference and timing percentiles use linear interpolation between sorted neighboring ranks. Aggregate event precision pools counts rather than averaging sessions. A mixed complete/incomplete input set is labeled `partial_annotated_benchmark` and reports `accuracySessionCount`.
+
+Synthetic/demo sessions are rejected by default, including either `source: "demo"` or `model: "synthetic"`. `--allow-synthetic` exists solely for software checks and marks the **entire report** `synthetic_software_check`, even when mixed with real sessions. Do not use this flag for a hardware or coaching validation report.
+
+The evaluator rejects unsupported schema versions, malformed intervals, duplicate event/annotation/session IDs, invalid physical hands, decreasing frame timestamps and nonfinite required timing values. Output cannot overwrite a supplied input session. The original export remains unchanged.
+
+## Coverage and timing
+
+Default required landmarks are MediaPipe indices **11,12,13,14,15,16,23,24**: both shoulders, elbows, wrists and hips. A joint must have finite normalized coordinates inside the image and available confidence at least 0.5; when both visibility and presence exist, both must pass. Missing points or confidence are unassessable. Change these explicitly with `--required-joints` and `--min-confidence` when defining another criterion.
+
+This is **landmark coverage among processed frames**, not the master plan's criterion assessment coverage. Missing/dropped frames are not automatically counted as assessable. Frame cadence, duplicate timestamps, large gaps, reported skipped frames and per-joint coverage accompany the percentage so sparse processing cannot masquerade as continuous observation.
+
+`PoseFrame.inferenceMs` supplies actual per-frame inference timings. The evaluator recomputes p50/p95 from frames rather than trusting the exported summary. `frameAgeMs`, when present, measures browser frame callback to completed inference; it does not measure sensor capture delay. `PunchEvent.detectedAtMs`, when present, is compared with the **matched annotation's end** to compute event-finalization delay on the shared source-relative clock. Timing coverage is reported. Missing telemetry is not synthesized from punch duration. Negative finalization delay means detection preceded the annotated end; inspect the boundary convention rather than clipping the value to zero.
+
+The report does not automatically declare any [release gate](project-plan.md#release-gates) passed. Coach-labeled criterion correctness, unconditional and eligible-event coverage, confidence bounds accounting for session/participant clustering, emitted cue errors, and retained learning improvement need separate study data. The current app's heuristic `score` is not a calibrated confidence probability and is not used for matching.
+
+## Reproducible personal and cohort tests
+
+Keep entire recording sessions together before trimming or augmentation. Tune on development sessions, freeze parameters and the annotation guide, then evaluate later-day sessions. For a broader product, reserve entire people and environments and report those separately from personal results. Record stance, device, room, view, light, model manifest and annotation provenance. Keep footage and private JSON exports out of Git.
+
+The initial app only detects experimental jab/cross events. The correct first report is allowed to show poor recall or precision; the purpose is to find the error sources before approving cues. Inspect false-positive IDs, missed events, wrong-hand cases and low-coverage frames in replay. A coach should label execution criteria independently of the model's output.
+
+## Optional RTMPose / RTMW extraction
+
+`ml/extract.py` is an optional saved-video adapter targeting **rtmlib 0.0.16**, with pinned dependencies in `ml/requirements-extract.txt`. Its mapping, manifest validation and CLI were tested; actual RTM inference on this Mac and real boxing footage has **not yet been verified**. It requests ONNX Runtime CPU only and makes no MPS/Core ML/browser/real-time claim. The [official rtmlib API](https://github.com/Tau-J/rtmlib) supports explicit detector/pose paths and MMPose ordering with `to_openpose=False`.
+
+Create a separate environment when running that experiment:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r ml/requirements-extract.txt
+.venv/bin/python -m ml.extract /absolute/path/clip.mp4 \
+  --manifest /absolute/path/model-manifest.json \
+  --output /absolute/path/rtm-poses.json
+```
+
+Use `ml/models.example.json` as the manifest format. Download the chosen model artifacts from the recorded official URLs, inspect their terms, extract the ONNX files locally, and set each `path` relative to the manifest file. The example records a YOLOX-m detector and RTMPose-m body model. Input sizes are `[width,height]`. The script **does not download weights or silently select default models**. It records original source URLs, local paths, file SHA-256, input sizes, package versions, platform and input-video SHA-256. An optional `expectedSha256` is enforced. A newly computed local hash is provenance, not independent proof of artifact authenticity.
+
+For RTMW, set `family` to `rtmw-wholebody`, select a verified 133-point COCO-WholeBody model and its correct input size from the official model zoo, and use its source URL. The extractor rejects a point-count mismatch. It abstains if detection yields zero or multiple people rather than silently changing identity. Mirrors and background people may therefore reduce coverage; inspect the person-count diagnostics.
+
+Mapping is deliberately conservative:
+
+| COCO / first 17 COCO-WholeBody index | Anatomical point | MediaPipe output index |
+|---|---|---|
+| 0 | Nose | 0 |
+| 5, 6 | Left/right shoulder | 11, 12 |
+| 7, 8 | Left/right elbow | 13, 14 |
+| 9, 10 | Left/right wrist | 15, 16 |
+| 11, 12 | Left/right hip | 23, 24 |
+| 13, 14 | Left/right knee | 25, 26 |
+| 15, 16 | Left/right ankle | 27, 28 |
+
+All other MediaPipe slots have zero confidence. No eyes, ears, fingers, heels or foot-index landmarks are approximated. No `z` or world coordinates are fabricated. RTM keypoint scores occupy the compatible `visibility` field but are explicitly identified as RTM confidence, **not calibrated MediaPipe visibility**; a common threshold is a protocol choice, not cross-model calibration. Coordinates are divided by their respective image width and height, and anatomical sides are never mirrored. COCO-WholeBody ordering is defined by [MMPose's dataset metadata](https://github.com/open-mmlab/mmpose/blob/main/configs/_base_/datasets/coco_wholebody.py).
+
+The adapter writes `artifactType: "research-pose-series"` with the same `PoseFrame` layout, not a browser `Session`: the current browser model union does not identify RTM models, and the extractor does not recognize punches. Do not rename it to MediaPipe `full` or submit an empty prediction list as a model accuracy benchmark. Compare pose coverage/timing first; an explicit motion-engine replay integration is needed to compare event detection fairly.
+
+Default timestamps come from OpenCV's video position in milliseconds, normalized to the first decoded frame. Non-increasing/unavailable timestamps fail clearly. Only for a verified constant-frame-rate source may `--assume-cfr` use frame index / reported FPS; this assumption is recorded. `--max-frames 30` provides a bounded smoke test and marks the output truncated. Pose timings include detector plus pose and first-call warm-up, and exclude decoding; the final frame duration is estimated and labeled as such. A meaningful performance test needs a complete representative clip and separate warm-up accounting.

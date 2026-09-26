@@ -1,0 +1,8 @@
+# Optional only. The evaluation CLI and its tests use Python's standard library.
+# Pinned adapter target; real-video/platform performance requires a local benchmark.
+rtmlib==0.0.16
+numpy==2.2.6
+onnxruntime==1.22.1
+opencv-python==4.11.0.86
+opencv-contrib-python==4.11.0.86
+tqdm==4.67.1

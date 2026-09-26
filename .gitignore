@@ -24,6 +24,12 @@
 *.mlmodel
 *.mlpackage/
 *.task
+/public/wasm/
+/public/models/*.task
+*.download-*
+/test-results/
+/playwright-report/
+*.tsbuildinfo
 
 # Development output
 node_modules/

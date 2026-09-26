@@ -1,0 +1,14 @@
+{
+  "family": "rtmpose-body",
+  "notes": "Example only: download from the listed official URLs and point path at the extracted ONNX file. Review model and training-data terms separately. inputSize is width,height.",
+  "detector": {
+    "path": "../models/yolox-m.onnx",
+    "sourceUrl": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_m_8xb8-300e_humanart-c2c7a14a.zip",
+    "inputSize": [640, 640]
+  },
+  "pose": {
+    "path": "../models/rtmpose-m.onnx",
+    "sourceUrl": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip",
+    "inputSize": [192, 256]
+  }
+}

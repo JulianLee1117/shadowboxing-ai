@@ -1,6 +1,19 @@
 # First sprint: prove the camera can support the coach
 
-Proposed duration: 3–5 working days for the lab, followed by 1–2 weeks of capture, annotation and comparison. These are estimates. This document is a backlog; none of these implementation tasks is complete.
+Original estimate: 3–5 working days for the lab, followed by 1–2 weeks of capture, annotation and comparison. Software implementation is now present; real-data measurement and coaching validation remain outstanding. See the ledger and [implementation status](implementation-status.md).
+
+## Completion ledger
+
+| Ticket | Current status |
+|---|---|
+| LAB-01 | Implemented and browser-tested with synthetic/stubbed camera inputs |
+| LAB-02 | Distinct-frame timing/settings implemented; sustained hardware acceptance pending |
+| LAB-03 | Local recording, imported-file retention, replay, export and deletion implemented |
+| LAB-04 | Worker, hashed local assets and GPU/CPU paths implemented; runtime smoke tests pass |
+| LAB-05 | RTM extractor/mapping implemented; actual RTM inference and comparison unverified |
+| LAB-06 | Action/hand/interval/note labels implemented; criterion/point annotation needs expansion |
+| LAB-07 | CLI event/capture reports implemented and tested; no labeled human corpus evaluated |
+| LAB-08 | Pending actual footage and comparative evidence |
 
 Target: M3 Max MacBook Pro, 36 GiB, built-in webcam. Initial user: beginner familiar with basic techniques. Personal usefulness comes first; generalization is a separate cohort evaluation.
 
@@ -75,7 +88,7 @@ Use meaningful tests around behavior that can corrupt feedback: mirrored/anatomi
 
 Verify offline and live feature parity. A noncausal smoother or full-clip model cannot be substituted into the live benchmark. Compare original PyTorch outputs and exported inference results before accepting an ONNX/Core ML model. Exercise camera permission rejection, stop/restart, offline operation, and deletion.
 
-No unit-test suite or inference result exists yet; these are acceptance requirements for the implementation sprint.
+A unit-test suite and synthetic-stream inference tests now exist. They verify integration and failure handling; real-data acceptance requirements remain open.
 
 ## Decision record at sprint end
 
