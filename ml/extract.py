@@ -168,6 +168,14 @@ def provider_configuration(requested: str, available: list[str]) -> dict:
         raise ValueError(f"Requested provider unavailable: {', '.join(missing)}")
     return {"requested": requested, "providers": providers,
             "providerOptions": [{} for _ in providers],
+            "providerOptionsByModel": {
+                # Empty post-NMS outputs have a zero-length dynamic dimension,
+                # unsupported by Core ML. Keep those detector nodes on CPU,
+                # matching the live service's explicit graph partition policy.
+                "detector": ([{"RequireStaticInputShapes": "1"}, {}]
+                             if requested == "coreml" else [{}]),
+                "pose": [{} for _ in providers],
+            },
             "computeConfiguration": "provider_defaults_no_compute_unit_override",
             "hardwareExecution": "not_established_by_provider_selection"}
 
@@ -184,7 +192,7 @@ def configure_coreml_sessions(model, manifest: dict, ort, configuration: dict,
         session = ort.InferenceSession(
             manifest[key]["path"], sess_options=options,
             providers=configuration["providers"],
-            provider_options=configuration["providerOptions"])
+            provider_options=configuration["providerOptionsByModel"][key])
         # CPU nodes in a partitioned Core ML graph are intentional. A runtime
         # error must not silently rebuild/retry the whole session on CPU.
         session.disable_fallback()

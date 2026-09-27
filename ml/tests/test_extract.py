@@ -111,7 +111,9 @@ class ProviderTests(unittest.TestCase):
             for call, name in zip(runtime.InferenceSession.call_args_list, ("detector", "pose")):
                 self.assertEqual(call.args[0], manifest[name]["path"])
                 self.assertEqual(call.kwargs["providers"], providers)
-                self.assertEqual(call.kwargs["provider_options"], [{}, {}])
+                expected = ([{"RequireStaticInputShapes": "1"}, {}]
+                            if name == "detector" else [{}, {}])
+                self.assertEqual(call.kwargs["provider_options"], expected)
                 options = call.kwargs["sess_options"]
                 self.assertTrue(options.enable_profiling)
                 self.assertEqual(options.profile_file_prefix, str((Path(directory) / name).resolve()))
