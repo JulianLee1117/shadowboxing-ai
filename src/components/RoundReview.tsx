@@ -7,8 +7,12 @@ import {
   Pause,
   Trash2,
   X,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { PoseOverlay } from "./PoseOverlay";
+import { punchName, punchNotation } from "../lib/punches";
+import "./RoundReview.css";
 import { assessArmTracking, DETECTOR_VERSION } from "../lib/motion";
 import { recheckDetections, type DetectorRecheckReport } from "../lib/recheck";
 import { useRoundAnalysis } from "../hooks/useRoundAnalysis";
@@ -49,6 +53,10 @@ export function RoundReview({
   onPractice,
 }: Props) {
   const [time, setTime] = useState(0);
+  const [focused, setFocused] = useState(false);
+  const focusButtonRef = useRef<HTMLButtonElement>(null);
+  const playerRef = useRef<HTMLDivElement>(null);
+  const wasFullscreen = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [overlay, setOverlay] = useState(false);
@@ -72,6 +80,13 @@ export function RoundReview({
   const videoReport = useVideoAnalysis ? analysis.report : null;
   const detectionEvents =
     videoReport?.events ?? updated?.events ?? selected?.events ?? [];
+  const visibleDetections = showPredictions
+    ? detectionEvents.filter(
+        // Native video seeking can round a fractional onset down. Allow one
+        // millisecond for display only; saved evidence and event bounds stay exact.
+        (event) => time + 1 >= event.startMs && time <= event.endMs,
+      )
+    : [];
   const trackingFrames = videoReport?.frames ?? selected?.frames ?? [];
   const savedUncertainty = useMemo(
     () => summarizeTrackingTrust(selected?.frames ?? [], duration),
@@ -87,12 +102,62 @@ export function RoundReview({
       }),
     [detectionEvents, selected?.stance, uncertaintyIntervals],
   );
-  const jabCount = detectionEvents.filter(
-    (event) => event.label === "jab",
-  ).length;
-  const crossCount = detectionEvents.filter(
-    (event) => event.label === "cross",
-  ).length;
+  const punchCounts = [
+    { notation: "1", name: "Jab", plural: "jabs" },
+    { notation: "2", name: "Cross", plural: "crosses" },
+    { notation: "3", name: "Lead hook", plural: "lead hooks" },
+    { notation: "4", name: "Rear hook", plural: "rear hooks" },
+    { notation: "5", name: "Lead uppercut", plural: "lead uppercuts" },
+    { notation: "6", name: "Rear uppercut", plural: "rear uppercuts" },
+  ].map((identity) => ({
+    ...identity,
+    count: detectionEvents.filter(
+      (event) => punchNotation(event) === identity.notation,
+    ).length,
+  }));
+  const leaveFocus = useCallback(() => {
+    setFocused(false);
+    if (document.fullscreenElement === playerRef.current)
+      void document.exitFullscreen().catch(() => {});
+  }, []);
+  const toggleFocus = async () => {
+    if (focused) return leaveFocus();
+    setFocused(true);
+    try {
+      await playerRef.current?.requestFullscreen?.();
+    } catch {
+      // The full-viewport focus view remains available without fullscreen support.
+    }
+  };
+  useEffect(() => {
+    leaveFocus();
+  }, [sessionId, leaveFocus]);
+  useEffect(() => {
+    const changed = () => {
+      const current = document.fullscreenElement === playerRef.current;
+      if (wasFullscreen.current && !current) setFocused(false);
+      wasFullscreen.current = current;
+    };
+    document.addEventListener("fullscreenchange", changed);
+    return () => document.removeEventListener("fullscreenchange", changed);
+  }, []);
+  useEffect(() => {
+    if (!focused) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        leaveFocus();
+        focusButtonRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [focused, leaveFocus]);
   useEffect(() => setRecheck(null), [sessionId, DETECTOR_VERSION]);
   useEffect(() => setUseVideoAnalysis(false), [sessionId]);
   useEffect(() => {
@@ -241,56 +306,60 @@ export function RoundReview({
   };
 
   return (
-    <section className="review">
-      <div className="page-heading">
-        <div>
-          <h1>Review</h1>
-          <p>
-            {selected
-              ? `${formatTime(duration)} round · ${selected.stance === "orthodox" ? "Left" : "Right"} hand leads`
-              : "Your rounds, saved on this device."}
-          </p>
-          {selected &&
-            selected.drill !== "open" &&
-            selected.drill in DRILLS && (
-              <p className="round-focus">
-                Focus: {DRILLS[selected.drill as DrillId].label}
-              </p>
-            )}
+    <section
+      className={`review round-review ${focused ? "review-is-focused" : ""}`}
+    >
+      <div className="review-intro" inert={focused}>
+        <div className="page-heading">
+          <div>
+            <h1>Review</h1>
+            <p>
+              {selected
+                ? `${formatTime(duration)} round · ${selected.stance === "orthodox" ? "Left" : "Right"} hand leads`
+                : "Your rounds, saved on this device."}
+            </p>
+            {selected &&
+              selected.drill !== "open" &&
+              selected.drill in DRILLS && (
+                <p className="round-focus">
+                  Focus: {DRILLS[selected.drill as DrillId].label}
+                </p>
+              )}
+          </div>
+          <button className="button secondary" onClick={onPractice}>
+            New round
+          </button>
         </div>
-        <button className="button secondary" onClick={onPractice}>
-          New round
-        </button>
+        {sessions.length > 0 && (
+          <div className="round-library" aria-label="Saved rounds">
+            {sessions.map((session) => (
+              <button
+                className={`session-item ${session.id === sessionId ? "selected" : ""}`}
+                aria-pressed={session.id === sessionId}
+                key={session.id}
+                onClick={() => onSelect(session)}
+              >
+                <span>
+                  {new Date(session.createdAt).toLocaleString([], {
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </span>
+                <small>
+                  {formatTime(session.durationMs)} ·{" "}
+                  {session.source === "demo"
+                    ? "Demo"
+                    : session.video
+                      ? "Video"
+                      : "Motion only"}
+                </small>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      {sessions.length > 0 && (
-        <div className="round-library" aria-label="Saved rounds">
-          {sessions.map((session) => (
-            <button
-              className={`session-item ${session.id === sessionId ? "selected" : ""}`}
-              aria-pressed={session.id === sessionId}
-              key={session.id}
-              onClick={() => onSelect(session)}
-            >
-              <span>
-                {new Date(session.createdAt).toLocaleString([], {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              </span>
-              <small>
-                {formatTime(session.durationMs)} ·{" "}
-                {session.source === "demo"
-                  ? "Demo"
-                  : session.video
-                    ? "Video"
-                    : "Motion only"}
-              </small>
-            </button>
-          ))}
-        </div>
-      )}
       {!selected ? (
         <div className="review-empty">
           <h2>
@@ -307,222 +376,277 @@ export function RoundReview({
         </div>
       ) : (
         <>
-          {selected.video && selected.source !== "demo" && (
-            <div className="analysis-panel">
-              <div className="analysis-row">
-                <div>
-                  <strong>
-                    {analysis.running
-                      ? "Analyzing locally…"
-                      : analysis.report
-                        ? analysis.report.completeness.status === "partial"
-                          ? "Partial analysis available"
-                          : "Round analysis ready"
-                        : "Review this recording"}
-                  </strong>
-                  <p>
-                    {analysis.running
-                      ? "You can watch while analysis runs."
-                      : analysis.report
-                        ? analysis.report.completeness.status === "partial"
-                          ? analysis.report.completeness.reason
-                          : "An experimental second pass, available to compare."
-                        : "Analyze punches and combinations on this device."}
-                  </p>
+          <div
+            ref={playerRef}
+            className={`review-player ${focused ? "is-focused" : ""}`}
+            role={focused ? "dialog" : undefined}
+            aria-modal={focused ? true : undefined}
+            aria-label={focused ? "Round replay" : undefined}
+            onKeyDown={(event) => {
+              if (!focused || event.key !== "Tab") return;
+              const controls = Array.from(
+                event.currentTarget.querySelectorAll<HTMLElement>(
+                  "button:not(:disabled), input:not(:disabled), select:not(:disabled), video[controls]",
+                ),
+              );
+              const first = controls[0],
+                last = controls.at(-1);
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last?.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first?.focus();
+              }
+            }}
+          >
+            <div className="review-player-heading">
+              <span>{selected.video ? "Recording" : "Motion replay"}</span>
+              <button
+                ref={focusButtonRef}
+                className="text-button review-focus-button"
+                aria-pressed={focused}
+                onClick={() => void toggleFocus()}
+              >
+                {focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                {focused ? "Exit focus" : "Focus video"}
+              </button>
+            </div>
+            <div className="replay-stage" key={selected.id}>
+              {videoUrl ? (
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  controls
+                  playsInline
+                  onLoadedMetadata={(e) => {
+                    e.currentTarget.currentTime = offset / 1000;
+                    sync(e.currentTarget);
+                  }}
+                  onSeeking={(e) => sync(e.currentTarget)}
+                  onSeeked={(e) => sync(e.currentTarget)}
+                  onTimeUpdate={(e) => sync(e.currentTarget)}
+                  onPlay={(e) => {
+                    setPlaying(true);
+                    sync(e.currentTarget);
+                  }}
+                  onPause={() => setPlaying(false)}
+                />
+              ) : (
+                <div className="replay-label">
+                  {selected.source === "demo"
+                    ? "Simulated replay"
+                    : "Motion only — video was not recorded"}
                 </div>
-                <div className="analysis-actions">
-                  {analysis.running ? (
-                    <>
-                      <span className="analysis-progress-text">
-                        {Math.round((analysis.progress?.fraction ?? 0) * 100)}%
-                      </span>
-                      <button className="text-button" onClick={analysis.cancel}>
-                        Cancel analysis
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {analysis.report && (
-                        <button
-                          className="text-button"
-                          onClick={() => {
-                            if (useVideoAnalysis) setRecheck(null);
-                            setUseVideoAnalysis((old) => !old);
-                            setShowPredictions(true);
-                          }}
-                        >
-                          {useVideoAnalysis
-                            ? "Show original"
-                            : "Show video analysis"}
-                        </button>
-                      )}
-                      {!analysis.report && (
-                        <button
-                          className="button secondary"
-                          disabled={analysis.loadingSaved}
-                          onClick={() => void analysis.start()}
-                        >
-                          Analyze recording
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-              {analysis.running && (
-                <progress
-                  aria-label="Round analysis progress"
-                  max={1}
-                  value={analysis.progress?.fraction ?? 0}
+              )}
+              {overlay && frame && (
+                <PoseOverlay
+                  frame={frame}
+                  mirror={false}
+                  silhouette={!videoUrl}
                 />
               )}
-              {analysis.error && (
-                <p className="analysis-error" role="alert">
-                  {analysis.error}
-                </p>
-              )}
-              {analysis.report && !analysis.saved && (
-                <p className="analysis-error">
-                  Analysis is available in this tab. Export it before closing.
-                </p>
+              {visibleDetections.length > 0 && (
+                <div
+                  className="replay-detection"
+                  aria-label="Current detected punches"
+                >
+                  <small>Detected</small>
+                  {visibleDetections.map((event) => (
+                    <div key={event.id}>
+                      <strong>{punchName(event)}</strong>
+                      <span>{event.hand} hand</span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-          )}
-          <div className="replay-stage" key={selected.id}>
-            {videoUrl ? (
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                controls
-                playsInline
-                onLoadedMetadata={(e) => {
-                  e.currentTarget.currentTime = offset / 1000;
-                  sync(e.currentTarget);
-                }}
-                onSeeking={(e) => sync(e.currentTarget)}
-                onSeeked={(e) => sync(e.currentTarget)}
-                onTimeUpdate={(e) => sync(e.currentTarget)}
-                onPlay={(e) => {
-                  setPlaying(true);
-                  sync(e.currentTarget);
-                }}
-                onPause={() => setPlaying(false)}
+            <div className="replay-controls">
+              <button
+                className="icon-button"
+                aria-label={playing ? "Pause replay" : "Play replay"}
+                onClick={togglePlay}
+              >
+                {playing ? <Pause size={18} /> : <Play size={18} />}
+              </button>
+              <button
+                className="icon-button"
+                aria-label="Previous frame"
+                onClick={() =>
+                  stepTo(
+                    trackingFrames.filter((f) => f.t < time - 1).at(-1)?.t ?? 0,
+                  )
+                }
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                className="icon-button"
+                aria-label="Next frame"
+                onClick={() =>
+                  stepTo(
+                    trackingFrames.find((f) => f.t > time + 1)?.t ?? duration,
+                  )
+                }
+              >
+                <ChevronRight size={18} />
+              </button>
+              <span>{(time / 1000).toFixed(1)}s</span>
+              <input
+                type="range"
+                aria-label="Replay position"
+                min={0}
+                max={duration || 1}
+                step={1}
+                value={Math.min(time, duration)}
+                onChange={(e) => seek(Number(e.target.value))}
               />
-            ) : (
-              <div className="replay-label">
-                {selected.source === "demo"
-                  ? "Simulated replay"
-                  : "Motion only — video was not recorded"}
+              <span>{formatTime(duration)}</span>
+            </div>
+            <div className="review-toggles">
+              <label>
+                Speed
+                <select
+                  aria-label="Playback speed"
+                  value={playbackRate}
+                  onChange={(e) => setPlaybackRate(Number(e.target.value))}
+                >
+                  <option value={0.5}>0.5×</option>
+                  <option value={1}>1×</option>
+                </select>
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={overlay}
+                  onChange={(e) => setOverlay(e.target.checked)}
+                />
+                Show tracking
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={showPredictions}
+                  onChange={(e) => setShowPredictions(e.target.checked)}
+                />
+                Show detections
+              </label>
+              <span
+                className={`save-status ${saveState === "error" ? "save-error" : ""}`}
+              >
+                {saveState === "saving"
+                  ? "Saving…"
+                  : saveState === "error"
+                    ? "Not saved — export before closing"
+                    : "Saved on this device"}
+              </span>
+            </div>
+          </div>
+          <div className="review-below" inert={focused}>
+            {selected.video && selected.source !== "demo" && (
+              <div className="analysis-panel">
+                <div className="analysis-row">
+                  <div>
+                    <strong>
+                      {analysis.running
+                        ? "Analyzing locally…"
+                        : analysis.report
+                          ? analysis.report.completeness.status === "partial"
+                            ? "Partial analysis available"
+                            : "Round analysis ready"
+                          : "Review this recording"}
+                    </strong>
+                    <p>
+                      {analysis.running
+                        ? "You can watch while analysis runs."
+                        : analysis.report
+                          ? analysis.report.completeness.status === "partial"
+                            ? analysis.report.completeness.reason
+                            : "An experimental second pass, available to compare."
+                          : "Analyze punches and combinations on this device."}
+                    </p>
+                  </div>
+                  <div className="analysis-actions">
+                    {analysis.running ? (
+                      <>
+                        <span className="analysis-progress-text">
+                          {Math.round((analysis.progress?.fraction ?? 0) * 100)}
+                          %
+                        </span>
+                        <button
+                          className="text-button"
+                          onClick={analysis.cancel}
+                        >
+                          Cancel analysis
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {analysis.report && (
+                          <button
+                            className="text-button"
+                            onClick={() => {
+                              if (useVideoAnalysis) setRecheck(null);
+                              setUseVideoAnalysis((old) => !old);
+                              setShowPredictions(true);
+                            }}
+                          >
+                            {useVideoAnalysis
+                              ? "Show original"
+                              : "Show video analysis"}
+                          </button>
+                        )}
+                        {!analysis.report && (
+                          <button
+                            className="button secondary"
+                            disabled={analysis.loadingSaved}
+                            onClick={() => void analysis.start()}
+                          >
+                            Analyze recording
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+                {analysis.running && (
+                  <progress
+                    aria-label="Round analysis progress"
+                    max={1}
+                    value={analysis.progress?.fraction ?? 0}
+                  />
+                )}
+                {analysis.error && (
+                  <p className="analysis-error" role="alert">
+                    {analysis.error}
+                  </p>
+                )}
+                {analysis.report && !analysis.saved && (
+                  <p className="analysis-error">
+                    Analysis is available in this tab. Export it before closing.
+                  </p>
+                )}
               </div>
             )}
-            {overlay && frame && (
-              <PoseOverlay
-                frame={frame}
-                mirror={false}
-                silhouette={!videoUrl}
-              />
+            {overlay && !frame && (
+              <p className="muted" role="status">
+                No recent pose sample at this moment. The overlay is hidden.
+              </p>
             )}
-          </div>
-          <div className="replay-controls">
-            <button
-              className="icon-button"
-              aria-label={playing ? "Pause replay" : "Play replay"}
-              onClick={togglePlay}
-            >
-              {playing ? <Pause size={18} /> : <Play size={18} />}
-            </button>
-            <button
-              className="icon-button"
-              aria-label="Previous frame"
-              onClick={() =>
-                stepTo(
-                  trackingFrames.filter((f) => f.t < time - 1).at(-1)?.t ?? 0,
-                )
-              }
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <button
-              className="icon-button"
-              aria-label="Next frame"
-              onClick={() =>
-                stepTo(
-                  trackingFrames.find((f) => f.t > time + 1)?.t ?? duration,
-                )
-              }
-            >
-              <ChevronRight size={18} />
-            </button>
-            <span>{(time / 1000).toFixed(1)}s</span>
-            <input
-              type="range"
-              aria-label="Replay position"
-              min={0}
-              max={duration || 1}
-              step={1}
-              value={Math.min(time, duration)}
-              onChange={(e) => seek(Number(e.target.value))}
-            />
-            <span>{formatTime(duration)}</span>
-          </div>
-          <div className="review-toggles">
-            <label>
-              Speed
-              <select
-                aria-label="Playback speed"
-                value={playbackRate}
-                onChange={(e) => setPlaybackRate(Number(e.target.value))}
-              >
-                <option value={0.5}>0.5×</option>
-                <option value={1}>1×</option>
-              </select>
-            </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={overlay}
-                onChange={(e) => setOverlay(e.target.checked)}
-              />
-              Show tracking
-            </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={showPredictions}
-                onChange={(e) => setShowPredictions(e.target.checked)}
-              />
-              Show detections
-            </label>
-            <span
-              className={`save-status ${saveState === "error" ? "save-error" : ""}`}
-            >
-              {saveState === "saving"
-                ? "Saving…"
-                : saveState === "error"
-                  ? "Not saved — export before closing"
-                  : "Saved on this device"}
-            </span>
-          </div>
-          {overlay && !frame && (
-            <p className="muted" role="status">
-              No recent pose sample at this moment. The overlay is hidden.
-            </p>
-          )}
-          {overlay && frame && (
-            <p className="tracking-description">
-              L · {tracking?.left.assessable ? "tracked" : "uncertain"}{" "}
-              <span> / </span> R ·{" "}
-              {tracking?.right.assessable ? "tracked" : "uncertain"}. Check L /
-              R follow your physical hands. Visibility does not confirm hand
-              identity or technique.
-            </p>
-          )}
-          {showPredictions && (
+            {overlay && frame && (
+              <p className="tracking-description">
+                L · {tracking?.left.assessable ? "tracked" : "uncertain"}{" "}
+                <span> / </span> R ·{" "}
+                {tracking?.right.assessable ? "tracked" : "uncertain"}. Check L
+                / R follow your physical hands. Visibility does not confirm hand
+                identity or technique.
+              </p>
+            )}
             <div className="detections">
               <div className="detection-heading">
                 <h2>
-                  {jabCount} {jabCount === 1 ? "jab" : "jabs"} <span>/</span>{" "}
-                  {crossCount} {crossCount === 1 ? "cross" : "crosses"}
+                  {detectionEvents.length} detected{" "}
+                  {detectionEvents.length === 1 ? "punch" : "punches"}
                 </h2>
                 <span>
                   {videoReport
@@ -553,27 +677,85 @@ export function RoundReview({
                     <p>Uses saved tracking; does not rerun pose.</p>
                   </>
                 )}
-              <div className="event-timeline">
-                {detectionEvents.length ? (
-                  detectionEvents.map((event) => (
-                    <button
-                      key={event.id}
-                      className={`event-chip ${event.label}`}
-                      onClick={() => seek(event.startMs)}
-                    >
-                      <strong>{event.label === "jab" ? "Jab" : "Cross"}</strong>
-                      <span>
-                        {(event.peakMs / 1000).toFixed(1)}s · {event.hand}
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <span className="muted">
-                    No straight punches were detected.
-                  </span>
-                )}
+              <div className="review-punch-counts" aria-label="Punch counts">
+                {punchCounts.map((punch) => (
+                  <div
+                    key={punch.notation}
+                    className={`review-count punch-${punch.notation}`}
+                  >
+                    <span className="review-count-name">
+                      <span>{punch.notation}</span>
+                      {punch.name}
+                    </span>
+                    <strong>{punch.count}</strong>
+                  </div>
+                ))}
               </div>
-              {combinations.length > 0 && (
+              {showPredictions && (
+                <>
+                  {detectionEvents.length > 0 && duration > 0 && (
+                    <div
+                      className="review-punch-timeline"
+                      aria-label="Punch timeline"
+                    >
+                      <div className="review-timeline-track">
+                        {detectionEvents.map((event) => (
+                          <button
+                            key={event.id}
+                            className={`review-punch-tick punch-${punchNotation(event)}`}
+                            style={{
+                              left: `${Math.max(0, Math.min(100, (event.peakMs / duration) * 100))}%`,
+                            }}
+                            aria-label={`${punchName(event)} at ${(event.peakMs / 1000).toFixed(2)} seconds`}
+                            title={`${punchNotation(event)} · ${punchName(event)} · ${(event.peakMs / 1000).toFixed(2)}s`}
+                            onClick={() => stepTo(event.startMs)}
+                          />
+                        ))}
+                        <span
+                          className="review-timeline-cursor"
+                          aria-hidden="true"
+                          style={{
+                            left: `${Math.max(0, Math.min(100, (time / duration) * 100))}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="review-timeline-labels">
+                        <span>0:00</span>
+                        <span>Click a punch to replay it</span>
+                        <span>{formatTime(duration)}</span>
+                      </div>
+                    </div>
+                  )}
+                  <div
+                    className="event-timeline review-punch-list"
+                    aria-label="Detected punches"
+                  >
+                    {detectionEvents.length ? (
+                      detectionEvents.map((event) => (
+                        <button
+                          key={event.id}
+                          className={`event-chip ${event.label} punch-${punchNotation(event)} ${visibleDetections.includes(event) ? "is-current" : ""}`}
+                          onClick={() => stepTo(event.startMs)}
+                        >
+                          <b className="review-punch-number" aria-hidden="true">
+                            {punchNotation(event)}
+                          </b>
+                          <strong>{punchName(event)}</strong>
+                          <span>
+                            {(event.peakMs / 1000).toFixed(2)}s · {event.hand}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <span className="muted">
+                        No punches were detected. Missed actions may still be
+                        visible in the video.
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+              {showPredictions && combinations.length > 0 && (
                 <div className="combination-section">
                   <h3>Combinations</h3>
                   <p>
@@ -597,7 +779,7 @@ export function RoundReview({
                   </div>
                 </div>
               )}
-              {!!uncertaintyIntervals.length && (
+              {showPredictions && !!uncertaintyIntervals.length && (
                 <details
                   className="uncertainty-details"
                   key={`uncertainty-${videoReport?.id ?? selected.id}`}
@@ -642,160 +824,165 @@ export function RoundReview({
                 </details>
               )}
             </div>
-          )}
-          {!selected.video && selected.source !== "demo" && (
-            <p className="legacy-note">
-              This round has tracking only; no video was saved. Record a new
-              camera round to check missed punches against the original footage.
-            </p>
-          )}
-          <ReferenceLabels
-            key={`labels-${selected.id}`}
-            session={selected}
-            onUpdate={onUpdate}
-            onNotice={onNotice}
-            seek={seek}
-          />
-          <details className="options" key={`export-${selected.id}`}>
-            <summary>Export & details</summary>
-            <div className="export-buttons">
-              {analysis.report && (
-                <button
-                  className="button secondary"
-                  onClick={() =>
-                    downloadBlob(
-                      new Blob(
-                        [
-                          JSON.stringify({
-                            ...analysis.report,
-                            combinations: groupCombinations(
-                              analysis.report!.events,
-                              {
-                                stance: selected.stance,
-                                uncertaintyIntervals:
-                                  analysis.report!.uncertaintyIntervals,
-                              },
-                            ),
-                          }),
-                        ],
-                        { type: "application/json" },
-                      ),
-                      `corner-${selected.id}-video-analysis.json`,
-                    )
-                  }
-                >
-                  <Download size={15} />
-                  Export video analysis
-                </button>
-              )}
-              <button
-                className="button secondary"
-                onClick={() => exportSession(selected)}
-              >
-                <Download size={15} />
-                Evidence JSON
-              </button>
-              {updated && (
-                <button
-                  className="button secondary"
-                  onClick={() =>
-                    downloadBlob(
-                      new Blob([JSON.stringify(updated)], {
-                        type: "application/json",
-                      }),
-                      `corner-${selected.id}-updated-analysis.json`,
-                    )
-                  }
-                >
-                  <Download size={15} />
-                  Export updated analysis
-                </button>
-              )}
-              {selected.video && (
-                <button
-                  className="button secondary"
-                  onClick={() =>
-                    downloadBlob(
-                      selected.video!,
-                      `corner-${selected.id}.${selected.video!.type.includes("mp4") ? "mp4" : "webm"}`,
-                    )
-                  }
-                >
-                  <Download size={15} />
-                  Export video
-                </button>
-              )}
-              <button
-                className="text-button delete"
-                onClick={() => void remove()}
-              >
-                <Trash2 size={15} />
-                Delete this round
-              </button>
-            </div>
-            {analysis.report && (
-              <div className="analysis-details">
-                <p>
-                  Video analysis uses its own tracking. Counts can differ from
-                  capture and may still be wrong.
-                </p>
-                <p>
-                  Video pass: {analysis.report.frames.length} frames ·{" "}
-                  {(analysis.report.cadence.processingMs / 1000).toFixed(1)}s{" "}
-                  processing · {analysis.report.model} /{" "}
-                  {analysis.report.delegate}. Detector:{" "}
-                  {analysis.report.detectorVersion}.
-                </p>
-                {analysis.report.completeness.status === "partial" && (
-                  <p>Partial analysis: {analysis.report.completeness.reason}</p>
-                )}
-                {analysis.report.warnings.map((warning) => (
-                  <p key={warning}>{warning}</p>
-                ))}
-                <button
-                  className="text-button"
-                  disabled={analysis.running}
-                  onClick={() => void analysis.start()}
-                >
-                  Analyze again
-                </button>
-              </div>
-            )}
-            {updated && (
-              <p>
-                Updated analysis exports detections only. Evidence JSON keeps
-                the original saved results.
+            {!selected.video && selected.source !== "demo" && (
+              <p className="legacy-note">
+                This round has tracking only; no video was saved. Record a new
+                camera round to check missed punches against the original
+                footage.
               </p>
             )}
-            <p>Original capture details</p>
-            <dl className="technical-details">
-              <div>
-                <dt>Model</dt>
-                <dd>{selected.model}</dd>
+            <ReferenceLabels
+              key={`labels-${selected.id}`}
+              session={selected}
+              onUpdate={onUpdate}
+              onNotice={onNotice}
+              seek={seek}
+            />
+            <details className="options" key={`export-${selected.id}`}>
+              <summary>Export & details</summary>
+              <div className="export-buttons">
+                {analysis.report && (
+                  <button
+                    className="button secondary"
+                    onClick={() =>
+                      downloadBlob(
+                        new Blob(
+                          [
+                            JSON.stringify({
+                              ...analysis.report,
+                              combinations: groupCombinations(
+                                analysis.report!.events,
+                                {
+                                  stance: selected.stance,
+                                  uncertaintyIntervals:
+                                    analysis.report!.uncertaintyIntervals,
+                                },
+                              ),
+                            }),
+                          ],
+                          { type: "application/json" },
+                        ),
+                        `corner-${selected.id}-video-analysis.json`,
+                      )
+                    }
+                  >
+                    <Download size={15} />
+                    Export video analysis
+                  </button>
+                )}
+                <button
+                  className="button secondary"
+                  onClick={() => exportSession(selected)}
+                >
+                  <Download size={15} />
+                  Evidence JSON
+                </button>
+                {updated && (
+                  <button
+                    className="button secondary"
+                    onClick={() =>
+                      downloadBlob(
+                        new Blob([JSON.stringify(updated)], {
+                          type: "application/json",
+                        }),
+                        `corner-${selected.id}-updated-analysis.json`,
+                      )
+                    }
+                  >
+                    <Download size={15} />
+                    Export updated analysis
+                  </button>
+                )}
+                {selected.video && (
+                  <button
+                    className="button secondary"
+                    onClick={() =>
+                      downloadBlob(
+                        selected.video!,
+                        `corner-${selected.id}.${selected.video!.type.includes("mp4") ? "mp4" : "webm"}`,
+                      )
+                    }
+                  >
+                    <Download size={15} />
+                    Export video
+                  </button>
+                )}
+                <button
+                  className="text-button delete"
+                  onClick={() => void remove()}
+                >
+                  <Trash2 size={15} />
+                  Delete this round
+                </button>
               </div>
-              <div>
-                <dt>Processed frames</dt>
-                <dd>{selected.frames.length}</dd>
-              </div>
-              <div>
-                <dt>Pose rate</dt>
-                <dd>{selected.measuredFps.toFixed(1)} fps</dd>
-              </div>
-              <div>
-                <dt>Inference p95</dt>
-                <dd>{Math.round(selected.inferenceP95)} ms</dd>
-              </div>
-              <div>
-                <dt>Detector</dt>
-                <dd>{selected.detectorVersion ?? "Original baseline (v1)"}</dd>
-              </div>
-            </dl>
-            <p>
-              Evidence JSON contains this round’s original detections. Software
-              updates do not rewrite saved results. Local browser storage is not
-              a backup.
-            </p>
-          </details>
+              {analysis.report && (
+                <div className="analysis-details">
+                  <p>
+                    Video analysis uses its own tracking. Counts can differ from
+                    capture and may still be wrong.
+                  </p>
+                  <p>
+                    Video pass: {analysis.report.frames.length} frames ·{" "}
+                    {(analysis.report.cadence.processingMs / 1000).toFixed(1)}s{" "}
+                    processing · {analysis.report.model} /{" "}
+                    {analysis.report.delegate}. Detector:{" "}
+                    {analysis.report.detectorVersion}.
+                  </p>
+                  {analysis.report.completeness.status === "partial" && (
+                    <p>
+                      Partial analysis: {analysis.report.completeness.reason}
+                    </p>
+                  )}
+                  {analysis.report.warnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
+                  <button
+                    className="text-button"
+                    disabled={analysis.running}
+                    onClick={() => void analysis.start()}
+                  >
+                    Analyze again
+                  </button>
+                </div>
+              )}
+              {updated && (
+                <p>
+                  Updated analysis exports detections only. Evidence JSON keeps
+                  the original saved results.
+                </p>
+              )}
+              <p>Original capture details</p>
+              <dl className="technical-details">
+                <div>
+                  <dt>Model</dt>
+                  <dd>{selected.model}</dd>
+                </div>
+                <div>
+                  <dt>Processed frames</dt>
+                  <dd>{selected.frames.length}</dd>
+                </div>
+                <div>
+                  <dt>Pose rate</dt>
+                  <dd>{selected.measuredFps.toFixed(1)} fps</dd>
+                </div>
+                <div>
+                  <dt>Inference p95</dt>
+                  <dd>{Math.round(selected.inferenceP95)} ms</dd>
+                </div>
+                <div>
+                  <dt>Detector</dt>
+                  <dd>
+                    {selected.detectorVersion ?? "Original baseline (v1)"}
+                  </dd>
+                </div>
+              </dl>
+              <p>
+                Evidence JSON contains this round’s original detections.
+                Software updates do not rewrite saved results. Local browser
+                storage is not a backup.
+              </p>
+            </details>
+          </div>
         </>
       )}
     </section>

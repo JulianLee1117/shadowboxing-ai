@@ -1009,7 +1009,7 @@ test("detection recheck is temporary and exports separately from original eviden
   await page
     .getByRole("checkbox", { name: "Show detections", exact: true })
     .check();
-  await expect(page.locator(".detections h2")).toHaveText("0 jabs / 0 crosses");
+  await expect(page.locator(".detections h2")).toHaveText("0 detected punches");
   await page
     .getByRole("button", { name: "Recheck detections", exact: true })
     .click();
@@ -1048,7 +1048,7 @@ test("detection recheck is temporary and exports separately from original eviden
   await page
     .getByRole("button", { name: "Use saved detections", exact: true })
     .click();
-  await expect(page.locator(".detections h2")).toHaveText("0 jabs / 0 crosses");
+  await expect(page.locator(".detections h2")).toHaveText("0 detected punches");
   await expect(
     page.getByRole("button", { name: "Export updated analysis", exact: true }),
   ).toHaveCount(0);
@@ -1078,7 +1078,7 @@ test("detection recheck is temporary and exports separately from original eviden
   await expect(
     page.getByRole("button", { name: "Recheck detections", exact: true }),
   ).toBeVisible();
-  await expect(page.locator(".detections h2")).toHaveText("0 jabs / 0 crosses");
+  await expect(page.locator(".detections h2")).toHaveText("0 detected punches");
 
   // Close the component and read the persisted session again: rechecks cannot
   // silently rewrite original events or provenance in IndexedDB.

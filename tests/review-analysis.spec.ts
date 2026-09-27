@@ -204,14 +204,14 @@ test("v1 migration preserves originals; separate analysis and focus survive relo
   await expect(page.locator(".detection-heading")).toContainText(
     "Original detections",
   );
-  await expect(page.locator(".detection-heading h2")).toContainText("1 jab");
+  await expect(page.locator(".review-count.punch-1 strong")).toHaveText("1");
   await page
     .getByRole("button", { name: "Show video analysis", exact: true })
     .click();
   await expect(page.locator(".detection-heading")).toContainText(
     "Video analysis",
   );
-  await expect(page.locator(".detection-heading h2")).toContainText("1 cross");
+  await expect(page.locator(".review-count.punch-2 strong")).toHaveText("1");
   await page.reload();
   await openReview(page);
   await expect(
@@ -418,14 +418,14 @@ test("partial reports show their limitation and require an explicit switch from 
   await expect(page.locator(".detection-heading")).toContainText(
     "Original detections",
   );
-  await expect(page.locator(".detection-heading h2")).toContainText("1 jab");
+  await expect(page.locator(".review-count.punch-1 strong")).toHaveText("1");
   await page
     .getByRole("button", { name: "Show video analysis", exact: true })
     .click();
   await expect(page.locator(".detection-heading")).toContainText(
     "Partial video analysis",
   );
-  await expect(page.locator(".detection-heading h2")).toContainText("1 cross");
+  await expect(page.locator(".review-count.punch-2 strong")).toHaveText("1");
   const original = (await dbState(page)).sessions[0];
   expect(original.events[0].id).toBe("original-event");
 });
@@ -453,8 +453,8 @@ test("original detections cannot form combinations across wholly missing saved t
   await page.reload();
   await openReview(page);
   await page.getByLabel("Show detections", { exact: true }).check();
-  await expect(page.locator(".detection-heading h2")).toContainText("1 jab");
-  await expect(page.locator(".detection-heading h2")).toContainText("1 cross");
+  await expect(page.locator(".review-count.punch-1 strong")).toHaveText("1");
+  await expect(page.locator(".review-count.punch-2 strong")).toHaveText("1");
   await expect(
     page.getByRole("heading", { name: "Combinations", exact: true }),
   ).toHaveCount(0);

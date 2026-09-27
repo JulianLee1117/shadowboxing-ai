@@ -1,10 +1,14 @@
 # Observed recognition events
 
-These modules describe observed movement evidence. They do not validate technique, prove anatomical identity, infer missing punches, or use the requested drill to make a sequence appear. They do not speak or schedule cues. The source `PunchEvent` remains unchanged.
+These modules describe observed movement evidence. They do not validate technique, prove anatomical identity, infer missing punches, or use the requested drill to make a sequence appear. They do not speak or schedule cues. The current detector version is `projected-six-punch-v7-supported-rise`.
+
+`PunchEvent.label` supports `jab`, `cross`, `hook` and `uppercut`. Every event retains its anatomical `hand` and stance-dependent `role`; the shared display helpers map these to Jab (1), Cross (2), Lead hook (3), Rear hook (4), Lead uppercut (5) and Rear uppercut (6). Mirroring the preview does not change the saved hand. Scores are heuristic signals, not calibrated probabilities. Adding classes does not validate their recognition accuracy.
+
+Practice displays the most recent detected punch and running total. Review keeps the recording prominent, offers fullscreen/focus viewing, and shows six count cards plus an optional clickable timeline and event list. Original events remain the default. Rechecking stored poses and analyzing the recording produce separate derived results; neither replaces the original evidence. Displayed counts and names are observations to inspect, not technique grades.
 
 ## Straight-action boundaries and recovery
 
-`projected-straight-v6-observed-repeats` separates action counting from return to the original guard position. A supported observed extension still needs a flexed elbow and at least two recovery observations spanning 30 ms. Recovery can reach the original reach allowance or retract at least half the measured excursion. This allows a partial return between fast repetitions; it does not certify a complete or correct guard return. An arm held extended, an unsupported spike, or a missing active arm cannot satisfy this evidence.
+The straight-action branch retains v6's separation of action counting from return to the original guard position. A supported observed extension still needs a flexed elbow and at least two recovery observations spanning 30 ms. Recovery can reach the original reach allowance or retract at least half the measured excursion. This allows a partial return between fast repetitions; it does not certify a complete or correct guard return. An arm held extended, an unsupported spike, or a missing active arm cannot satisfy this evidence.
 
 An isolated stroke still requires at least .45 torso lengths of observed reach increase and a supported projected elbow angle of at least 145 degrees. An **already accepted full stroke** can establish a short-lived reference for the same hand's next extension. A repeat then needs at least .225 torso lengths of its own travel, the same supported elbow straightening, and a reach at least .45 beyond the preceding full stroke's origin. Its own onset, path and recovery must still qualify. This avoids demanding a full isolated stroke's travel again after a partial return.
 
@@ -17,6 +21,14 @@ The reference expires 650 ms after the preceding full stroke's observed peak. Re
 A ready static reference can follow coherent inward motion over at least three observations and 60 ms; it cannot follow an outgoing hand. After a small candidate fails to establish a supported extension, only the last 200 ms of valid acquisition observations survive. The rejected candidate, peak evidence and ready reference do not survive. Tracking loss, timing gaps, invalid geometry and framing changes still discard the relevant history.
 
 Straight-looking relaxed arm lowering can still satisfy the projected-motion rules. A confidently misplaced wrist can also suggest a recovery that did not happen physically. Neither event detection nor the diagnostic confidence gate resolves these ambiguities. Do not convert those signals into technique corrections or hide false events by adjusting the reference labels.
+
+## Experimental hooks and uppercuts
+
+`src/lib/curvedMotion.ts` examines shoulder-relative, aspect-corrected image-plane wrist and elbow paths. A hook needs an observed predominantly horizontal sweep with a supported bent elbow and elbow travel; an uppercut needs an observed rising drive with corresponding bent-arm geometry. Several actual observations must support guard acquisition, the outbound path, peak and recovery. Missing joints, timing gaps and framing changes reset the relevant evidence; the observer does not interpolate a strike through a gap.
+
+An accepted curved cycle clears competing straight/repeat context for that arm. Supported bent-arm evidence can suppress a competing straight candidate rather than count the same cycle twice. A curved event's `peakMs` is the observed maximum displacement from its strike origin, which may follow a loading movement. `endMs` and `detectedAtMs` still distinguish the first qualifying recovery observation from its later confirmation. `guardReturn` compares with the observed guard/recovery reference, which can precede the curved event's `startMs`.
+
+These rules are view-dependent engineering assumptions, not a learned six-punch classifier or biomechanical standards. A depth-directed hook, a low body punch, a short rapid arc, or a real punch during arm occlusion can remain unclassified. Real-video checks have not established reliable hook recognition; synthetic fixtures establish only the implemented software behavior. A hook's looping return can resemble a different family when the actual delivery is missing, and confidently wrong joints can mimic a valid path. Preserve family ambiguity in independent annotations and report missed actions and false events, not just supported output names.
 
 ## Combinations
 
@@ -63,4 +75,4 @@ The isolated-detour check uses the following observed frame. Its `assessedAtMs` 
 
 Late in-flight pose results beyond a round's declared deadline are excluded from this report and counted in `outsideRoundFrames`; the original observations and duration remain unchanged. Interval reason codes distinguish missing samples, ordinary initial/reacquisition time, low-confidence joints, and trajectory anomalies. A UI must not present the number of all uncertain intervals as the number of proven tracking errors.
 
-Unit tests cover longest/nonoverlapping patterns, overlapping punch intervals, stance and hand consistency, uncertainty gaps, delayed arrivals, stable IDs, reset/late-evidence behavior, arm independence, suspicious high-confidence motion, legitimate monotonic extension, timing gaps, nonmutation, and complete per-arm interval coverage. Private A/B/C review is a diagnostic exercise on one participant, not a calibrated tracking or combination-accuracy benchmark.
+Unit tests cover longest/nonoverlapping patterns, overlapping punch intervals, stance and hand consistency, uncertainty gaps, delayed arrivals, stable IDs, reset/late-evidence behavior, arm independence, suspicious high-confidence motion, legitimate monotonic extension, timing gaps, nonmutation, and complete per-arm interval coverage. Local development-video review is a diagnostic exercise, not a calibrated tracking or combination-accuracy benchmark.

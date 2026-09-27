@@ -40,10 +40,46 @@ test("batch CLI preserves evidence, scores unchanged labels and refuses to repla
     );
     assert.equal(report.current.tp, 0);
     assert.equal(report.current.recall, null);
+    assert.deepEqual(report.protocol.labels, [
+      "jab",
+      "cross",
+      "hook",
+      "uppercut",
+    ]);
     assert.equal(report.sessions[0].sourceSessionId, fixture.id);
     assert.deepEqual(report.sessions[0].lostAnnotationIds, []);
     assert.equal(await readFile(input, "utf8"), original);
     await assert.rejects(execute(process.execPath, args), /EEXIST/);
+    fixture.annotations = [
+      {
+        id: "fixture-hook",
+        label: "hook",
+        hand: "left",
+        startMs: 100,
+        endMs: 500,
+      },
+    ];
+    await writeFile(input, JSON.stringify(fixture));
+    for (const [scope, missed] of [
+      ["jab,cross,hook,uppercut", 1],
+      ["jab,cross", 0],
+    ]) {
+      const scopedOutput = path.join(directory, `scope-${missed}`);
+      await execute(process.execPath, [
+        "scripts/benchmark.mjs",
+        input,
+        "--output-dir",
+        scopedOutput,
+        "--labels",
+        scope,
+      ]);
+      const comparison = JSON.parse(
+        await readFile(path.join(scopedOutput, "comparison.json")),
+      );
+      assert.equal(comparison.saved.fn, missed);
+      assert.equal(comparison.current.fn, missed);
+      assert.deepEqual(comparison.protocol.labels, scope.split(","));
+    }
     fixture.annotationsComplete = false;
     await writeFile(input, JSON.stringify(fixture));
     await assert.rejects(

@@ -8,10 +8,10 @@ For the next live check, use one fresh recording after the update. There is no t
 
 Open [Practice](http://127.0.0.1:5173), keep **30 seconds**, and choose your usual **Lead hand**. Leave **Practice focus** on free practice for this mixed test. Keep your head, hips and extended hands in view, with light in front of you where practical.
 
-Click **Enable camera → Record round**, then step back during the eight-second countdown. No second click is needed.
+Click **Enable camera**, optionally turn on **Focus view**, then **Record round** and step back during the eight-second countdown. No second click is needed. Check that the timer, punch name and count are readable from your stance. Tracking warnings should remain visible during recording.
 
-- Start with a few clearly separated jabs and right-hand crosses at a comfortable pace (left-hand crosses if your usual lead is right).
-- Then try a few quicker **double jabs** and **jab–cross pairs**, resetting naturally between sequences. Let your guard move naturally; do not force a long pause to satisfy the detector.
+- Try two comfortable examples each of **jab, cross, lead hook, rear hook, lead uppercut and rear uppercut**, with a brief natural reset between actions. Stop the sequence early if needed; this is not a required count.
+- If time permits, add a few faster punches or a short mixed sequence at your usual pace. Note which names appear, which punches are missed, and whether either arm becomes uncertain.
 - Spend the last few seconds without punching: relax and lower your hands, then return to guard. Check for false counts during this portion.
 
 This is a short sample, not a rigid script. Note extra, missed or interrupted actions rather than assuming the intended sequence happened. On a later day, repeat one similar round with the version held fixed; the earlier debugging footage cannot establish fresh-session performance.
@@ -27,7 +27,8 @@ A separate local video analysis starts for the new completed recording. You can 
 A short note is enough:
 
 ```text
-Any obvious missed or extra singles/sequences, and roughly when:
+Were the video, timer and live punch names easy to see from your stance?
+Which punch types were missed or mislabeled, and roughly when:
 Did tracking follow the correct hands during overlap or fast punches?
 Any counts during the idle ending?
 Video saved, camera off, and local analysis completed or canceled?

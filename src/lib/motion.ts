@@ -8,12 +8,13 @@ import {
   type QualityState,
   type Stance,
 } from "./types";
+import { CurvedMotionObserver } from "./curvedMotion";
 
 type Hand = PunchEvent["hand"];
 type Point = { x: number; y: number };
 
 /** Include in saved evidence so replays can identify the counting rules used. */
-export const DETECTOR_VERSION = "projected-straight-v6-observed-repeats";
+export const DETECTOR_VERSION = "projected-six-punch-v7-supported-rise";
 
 export interface ArmTrackingState {
   hand: Hand;
@@ -253,7 +254,10 @@ interface ArmSample {
   angle: number;
 }
 
-export function armGeometry(frame: PoseFrame, hand: Hand): ArmSample {
+export function armGeometry(
+  frame: PoseFrame,
+  hand: Hand,
+): ArmSample & { elbow: Point } {
   const p = (index: number) =>
     aspectPoint(frame.landmarks[index], frame.width, frame.height);
   const shoulder = p(
@@ -269,6 +273,10 @@ export function armGeometry(frame: PoseFrame, hand: Hand): ArmSample {
   return {
     t: frame.t,
     wrist: relativeWrist,
+    elbow: {
+      x: (elbow.x - shoulder.x) / scale,
+      y: (elbow.y - shoulder.y) / scale,
+    },
     reach: Math.hypot(relativeWrist.x, relativeWrist.y),
     angle: angleAt(shoulder, elbow, wrist),
   };
@@ -439,9 +447,9 @@ function coherentInward(samples: readonly ArmSample[]): boolean {
 }
 
 /**
- * Causal extension/recovery heuristic for a supported projected straight-like motion.
- * This cannot distinguish every straight from hooks/uppercuts/other gestures. It is
- * deliberately experimental and has no requested-drill input or learned accuracy.
+ * Causal straight and directional bent-arm cycle heuristics, with one event per
+ * arm/cycle. Depth-only or ambiguous motion is not resolved from a requested drill.
+ * Image geometry is experimental evidence, not a learned accuracy or form score.
  */
 export class MotionEngine {
   private options: EngineOptions;
@@ -452,6 +460,10 @@ export class MotionEngine {
   private lastTime: number | null = null;
   private lastAspect: number | null = null;
   private sequence = 0;
+  private curves: Record<Hand, CurvedMotionObserver> = {
+    left: new CurvedMotionObserver(),
+    right: new CurvedMotionObserver(),
+  };
 
   constructor(options: EngineOptions) {
     this.options = { ...options };
@@ -464,6 +476,8 @@ export class MotionEngine {
 
   private clearTracking(): void {
     this.arms = { left: freshArm(), right: freshArm() };
+    this.curves.left.reset();
+    this.curves.right.reset();
     this.lastTime = null;
     this.lastAspect = null;
   }
@@ -523,16 +537,54 @@ export class MotionEngine {
       if (!armTracking[hand].assessable) {
         // Never bridge missing active-arm evidence or reuse its stale baseline.
         this.arms[hand] = freshArm();
+        this.curves[hand].reset();
         continue;
       }
-      const event = this.updateArm(hand, armGeometry(frame, hand));
-      if (event) events.push(event);
+      const sample = armGeometry(frame, hand);
+      const curved = this.curves[hand].update(sample);
+      if (curved) {
+        events.push({
+          id: `motion-${++this.sequence}-${hand}-${Math.round(curved.startMs)}`,
+          hand,
+          role: anatomicalRole(hand, this.options.stance),
+          label: curved.label,
+          startMs: curved.startMs,
+          peakMs: curved.peakMs,
+          endMs: curved.endMs,
+          detectedAtMs: curved.detectedAtMs,
+          score: curved.score,
+          extension: curved.excursion,
+          guardReturn: curved.returned ? "returned" : "not-observed",
+          experimental: true,
+        });
+        // A curved cycle cannot leave behind a straight candidate or repeat
+        // anchor. Its observed recovery can acquire the next independent stroke.
+        this.arms[hand] = {
+          ...freshArm(),
+          previous: sample,
+          rest: sample,
+          restStartMs: sample.t,
+          restFrames: 1,
+          readyFromMotion: true,
+        };
+      } else {
+        const event = this.updateArm(hand, sample);
+        if (event && !this.curves[hand].blocksStraight) {
+          events.push(event);
+          // A finalized straight owns this cycle; do not count its return again.
+          this.curves[hand].reset();
+        } else if (event) {
+          // A suppressed straight must not create a repeat anchor or readiness.
+          this.arms[hand] = freshArm();
+        }
+      }
     }
-    const activeHand = this.arms.left.candidate
-      ? "left"
-      : this.arms.right.candidate
-        ? "right"
-        : null;
+    const activeHand =
+      this.arms.left.candidate || this.curves.left.active
+        ? "left"
+        : this.arms.right.candidate || this.curves.right.active
+          ? "right"
+          : null;
     return { quality, events, activeHand };
   }
 

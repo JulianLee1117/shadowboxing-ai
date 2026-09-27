@@ -12,12 +12,13 @@ const { values, positionals } = parseArgs({
   options: {
     "output-dir": { type: "string" },
     python: { type: "string", default: "python3" },
+    labels: { type: "string", default: "jab,cross,hook,uppercut" },
     help: { type: "boolean" },
   },
 });
 if (values.help || !positionals.length || !values["output-dir"]) {
   console.log(
-    "Usage: npm run benchmark -- labeled-a.json labeled-b.json --output-dir data/pilot/runs/unique-run [--python python3]\nCompares saved detections with current rules on the same frames and labels. Requires complete real-session annotations and a new output directory. No uploads or model downloads.",
+    "Usage: npm run benchmark -- labeled-a.json labeled-b.json --output-dir data/pilot/runs/unique-run [--python python3] [--labels jab,cross,hook,uppercut]\nCompares saved detections with current rules on the same frames and labels. The default recall scope includes all six punches. Requires complete real-session annotations and a new output directory. No uploads or model downloads.",
   );
   process.exit(values.help ? 0 : 2);
 }
@@ -37,7 +38,15 @@ try {
   const baselinePath = path.join(outputDir, "saved-report.json");
   await execute(
     values.python,
-    ["-m", "ml.evaluate", ...inputs, "--output", baselinePath],
+    [
+      "-m",
+      "ml.evaluate",
+      ...inputs,
+      "--labels",
+      values.labels,
+      "--output",
+      baselinePath,
+    ],
     { cwd: root },
   );
   const derived = [];
@@ -66,7 +75,15 @@ try {
   const currentPath = path.join(outputDir, "current-report.json");
   await execute(
     values.python,
-    ["-m", "ml.evaluate", ...derived, "--output", currentPath],
+    [
+      "-m",
+      "ml.evaluate",
+      ...derived,
+      "--labels",
+      values.labels,
+      "--output",
+      currentPath,
+    ],
     { cwd: root },
   );
   const saved = JSON.parse(await readFile(baselinePath, "utf8"));
@@ -91,6 +108,7 @@ try {
     artifactType: "detector-development-comparison",
     createdAt: new Date().toISOString(),
     detectorSourceSha256: detectorHash,
+    protocol: saved.protocol,
     limitations:
       "Development regression on unchanged poses and labels; not held-out accuracy, model retraining, or coaching validation. Saved sessions may contain different detector versions.",
     saved: saved.eventMetrics,

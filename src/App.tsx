@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, Circle, Square, Upload, X } from "lucide-react";
+import {
+  Camera,
+  Circle,
+  Maximize2,
+  Minimize2,
+  Square,
+  Upload,
+  X,
+} from "lucide-react";
 import { useStudio } from "./hooks/useStudio";
 import { PoseOverlay } from "./components/PoseOverlay";
 import { RoundReview } from "./components/RoundReview";
+import { LiveFeedback } from "./components/LiveFeedback";
 import { assessArmTracking } from "./lib/motion";
 import { ReadinessGate } from "./lib/readiness";
 import { DRILLS, type DrillId } from "./lib/drills";
@@ -15,7 +24,8 @@ function App() {
   const [duration, setDuration] = useState(30);
   const [drill, setDrill] = useState<DrillId>("open");
   const [model, setModel] = useState<ModelVariant>("full");
-  const [overlay, setOverlay] = useState(true);
+  const [overlay, setOverlay] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [sound, setSound] = useState(true);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<Session | null>(null);
@@ -31,6 +41,8 @@ function App() {
   const uploadRef = useRef<HTMLInputElement>(null);
   const audio = useRef<AudioContext | null>(null);
   const lastBeep = useRef(-1);
+  const arenaRef = useRef<HTMLDivElement>(null);
+  const wasFullscreen = useRef(false);
   const persist = useCallback(async (session: Session) => {
     const revision = (saveRevisions.current[session.id] ?? 0) + 1;
     saveRevisions.current[session.id] = revision;
@@ -73,6 +85,67 @@ function App() {
     [persist],
   );
   const studio = useStudio(onComplete);
+
+  const leaveFocus = useCallback(() => {
+    setFocused(false);
+    if (document.fullscreenElement === arenaRef.current)
+      void document.exitFullscreen().catch(() => {});
+  }, []);
+  const toggleFocus = async () => {
+    if (focused) return leaveFocus();
+    setFocused(true);
+    // The viewport-sized focus view also works when native fullscreen is
+    // unavailable or declined. No camera permission is requested here.
+    try {
+      await arenaRef.current?.requestFullscreen?.();
+    } catch {
+      /* Keep the in-page focus view. */
+    }
+  };
+  useEffect(() => {
+    const changed = () => {
+      const current = document.fullscreenElement === arenaRef.current;
+      if (wasFullscreen.current && !current) setFocused(false);
+      wasFullscreen.current = current;
+    };
+    document.addEventListener("fullscreenchange", changed);
+    return () => document.removeEventListener("fullscreenchange", changed);
+  }, []);
+  useEffect(() => {
+    if (!focused) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") leaveFocus();
+      if (event.key === "Tab") {
+        const controls = Array.from(
+          arenaRef.current?.querySelectorAll<HTMLElement>(
+            "button:not(:disabled), select:not(:disabled), input:not(:disabled), [tabindex='0']",
+          ) ?? [],
+        ).filter((element) => element.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (
+          first &&
+          last &&
+          (!arenaRef.current?.contains(document.activeElement) ||
+            (event.shiftKey && document.activeElement === first) ||
+            (!event.shiftKey && document.activeElement === last))
+        ) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", keydown);
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener("keydown", keydown);
+    };
+  }, [focused, leaveFocus]);
+  useEffect(() => {
+    if (view !== "practice") leaveFocus();
+  }, [view, leaveFocus]);
 
   useEffect(() => {
     void listSessions()
@@ -197,7 +270,9 @@ function App() {
   const active = studio.running || readiness.pending || finishing;
 
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell ${view === "practice" ? "practice-shell" : "review-shell"}`}
+    >
       <header className="app-header">
         <a
           className="wordmark"
@@ -259,162 +334,205 @@ function App() {
             </span>
           </div>
           <div
-            className={`camera-stage ${studio.source === "demo" ? "demo-stage" : ""}`}
+            ref={arenaRef}
+            className={`practice-arena ${focused ? "is-focused" : ""} ${studio.running ? "is-recording" : ""}`}
           >
-            <video
-              ref={studio.videoRef}
-              muted
-              playsInline
-              className={
-                studio.source === "demo" || studio.status === "off"
-                  ? "capture-hidden"
-                  : ""
-              }
-              style={{
-                transform:
-                  studio.source === "camera" ? "scaleX(-1)" : undefined,
-              }}
-            />
-            {(overlay || studio.source === "demo") &&
-              studio.status === "ready" && (
-                <PoseOverlay
-                  frame={studio.frame}
-                  mirror={studio.source === "camera"}
-                  silhouette={studio.source === "demo"}
+            <div
+              className={`camera-stage ${studio.source === "demo" ? "demo-stage" : ""}`}
+            >
+              <video
+                ref={studio.videoRef}
+                muted
+                playsInline
+                className={
+                  studio.source === "demo" || studio.status === "off"
+                    ? "capture-hidden"
+                    : ""
+                }
+                style={{
+                  transform:
+                    studio.source === "camera" ? "scaleX(-1)" : undefined,
+                }}
+              />
+              {(overlay || studio.source === "demo") &&
+                studio.status === "ready" && (
+                  <PoseOverlay
+                    frame={studio.frame}
+                    mirror={studio.source === "camera"}
+                    silhouette={studio.source === "demo"}
+                  />
+                )}
+              {studio.status === "off" && (
+                <div className="stage-empty">
+                  <div className="camera-symbol">
+                    <Camera size={28} strokeWidth={1.4} />
+                  </div>
+                  <h2>Your space to practice.</h2>
+                  <p>Enable the webcam to get started.</p>
+                  <button
+                    className="button primary"
+                    onClick={() => void startSource("camera")}
+                  >
+                    <Camera size={17} />
+                    Enable camera
+                  </button>
+                </div>
+              )}
+              {studio.status === "loading" && (
+                <div className="stage-message">
+                  <span className="spinner" />
+                  <h2>Preparing the camera & tracking…</h2>
+                  <p>This can take a moment the first time.</p>
+                </div>
+              )}
+              <button
+                className="focus-toggle"
+                onClick={() => void toggleFocus()}
+                aria-label={focused ? "Exit focus view" : "Focus view"}
+                aria-pressed={focused}
+                title={focused ? "Exit focus view (Esc)" : "Focus view"}
+              >
+                {focused ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                <span>{focused ? "Exit focus" : "Focus view"}</span>
+              </button>
+              {readiness.pending && (
+                <div className="countdown-overlay" aria-live="polite">
+                  <span className="countdown-number">
+                    {readiness.countdownSeconds}
+                  </span>
+                  <h2>Step back into position</h2>
+                  <p>
+                    Recording starts automatically. Keep your hands in view.
+                  </p>
+                </div>
+              )}
+              {studio.status === "ready" && !readiness.pending && (
+                <div className="stage-topline">
+                  <span className="stage-pill">
+                    {studio.running ? (
+                      <>
+                        <i className="record-dot" />
+                        {studio.source === "camera" ? "Recording" : "Running"}
+                      </>
+                    ) : studio.source === "demo" ? (
+                      "Simulated demo"
+                    ) : studio.source === "file" ? (
+                      "Imported clip"
+                    ) : (
+                      "Camera ready"
+                    )}
+                  </span>
+                  {studio.running && (
+                    <div
+                      className="round-clock"
+                      role="timer"
+                      aria-label="Round time remaining"
+                    >
+                      <span>
+                        {formatTime(
+                          Math.max(0, duration * 1000 - studio.elapsed),
+                        )}
+                      </span>
+                      <small>remaining</small>
+                    </div>
+                  )}
+                </div>
+              )}
+              {studio.running && !readiness.pending && (
+                <LiveFeedback
+                  events={studio.events}
+                  elapsedMs={studio.elapsed}
+                  trackingUnclear={
+                    !tracking?.left.assessable && !tracking?.right.assessable
+                  }
                 />
               )}
-            {studio.status === "off" && (
-              <div className="stage-empty">
-                <div className="camera-symbol">
-                  <Camera size={28} strokeWidth={1.4} />
-                </div>
-                <h2>Your space to practice.</h2>
-                <p>Enable the webcam to get started.</p>
-                <button
-                  className="button primary"
-                  onClick={() => void startSource("camera")}
+              {studio.status === "ready" && !readiness.pending && (
+                <div
+                  className={`tracking-strip ${studio.running ? "tracking-live" : ""}`}
+                  aria-label="Arm tracking"
                 >
-                  <Camera size={17} />
-                  Enable camera
-                </button>
-              </div>
-            )}
-            {studio.status === "loading" && (
-              <div className="stage-message">
-                <span className="spinner" />
-                <h2>Preparing the camera & tracking…</h2>
-                <p>This can take a moment the first time.</p>
-              </div>
-            )}
-            {readiness.pending && (
-              <div className="countdown-overlay" aria-live="polite">
-                <span className="countdown-number">
-                  {readiness.countdownSeconds}
-                </span>
-                <h2>Step back into position</h2>
-                <p>Recording starts automatically. Keep your hands in view.</p>
-              </div>
-            )}
-            {studio.status === "ready" && !readiness.pending && (
-              <div className="stage-topline">
-                <span className="stage-pill">
-                  {studio.running ? (
-                    <>
-                      <i className="record-dot" />
-                      {studio.source === "camera" ? "Recording" : "Running"}
-                    </>
-                  ) : studio.source === "demo" ? (
-                    "Simulated demo"
-                  ) : studio.source === "file" ? (
-                    "Imported clip"
-                  ) : (
-                    "Camera ready"
-                  )}
-                </span>
-                {studio.running && (
-                  <span className="round-clock">
-                    {formatTime(Math.max(0, duration * 1000 - studio.elapsed))}
+                  <span
+                    className={
+                      tracking?.left.assessable ? "tracked" : "uncertain"
+                    }
+                  >
+                    L · {tracking?.left.assessable ? "tracked" : "uncertain"}
                   </span>
+                  <span
+                    className={
+                      tracking?.right.assessable ? "tracked" : "uncertain"
+                    }
+                  >
+                    R · {tracking?.right.assessable ? "tracked" : "uncertain"}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="practice-controls">
+              <div className="round-settings">
+                <label>
+                  Lead hand
+                  <select
+                    aria-label="Lead hand"
+                    value={stance}
+                    disabled={active || studio.status === "loading"}
+                    onChange={(e) => setStance(e.target.value as Stance)}
+                  >
+                    <option value="orthodox">Left hand leads</option>
+                    <option value="southpaw">Right hand leads</option>
+                  </select>
+                </label>
+                <label>
+                  Round
+                  <select
+                    aria-label="Round duration"
+                    value={duration}
+                    disabled={active || studio.status === "loading"}
+                    onChange={(e) => setDuration(Number(e.target.value))}
+                  >
+                    <option value={30}>30 seconds</option>
+                    <option value={60}>1 minute</option>
+                    <option value={120}>2 minutes</option>
+                    <option value={180}>3 minutes</option>
+                  </select>
+                </label>
+              </div>
+              <div className="action-group">
+                {readiness.pending ? (
+                  <button
+                    className="button secondary"
+                    onClick={cancelCountdown}
+                  >
+                    Cancel countdown
+                  </button>
+                ) : studio.running || finishing ? (
+                  <button
+                    className="button stop"
+                    disabled={finishing}
+                    onClick={() => void stop()}
+                  >
+                    <Square size={15} fill="currentColor" />
+                    {finishing ? "Saving…" : "Stop & save"}
+                  </button>
+                ) : studio.status === "ready" ? (
+                  <button className="button primary" onClick={record}>
+                    <Circle size={14} fill="currentColor" />
+                    {studio.source === "camera"
+                      ? "Record round"
+                      : studio.source === "file"
+                        ? "Analyze clip"
+                        : "Start demo"}
+                  </button>
+                ) : null}
+                {studio.status !== "off" && !active && (
+                  <button className="text-button" onClick={() => void stop()}>
+                    {studio.source === "camera"
+                      ? "Stop camera"
+                      : "Close source"}
+                  </button>
                 )}
               </div>
-            )}
-            {studio.status === "ready" && !readiness.pending && (
-              <div className="tracking-strip" aria-label="Arm tracking">
-                <span
-                  className={
-                    tracking?.left.assessable ? "tracked" : "uncertain"
-                  }
-                >
-                  L · {tracking?.left.assessable ? "tracked" : "uncertain"}
-                </span>
-                <span
-                  className={
-                    tracking?.right.assessable ? "tracked" : "uncertain"
-                  }
-                >
-                  R · {tracking?.right.assessable ? "tracked" : "uncertain"}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="practice-controls">
-            <div className="round-settings">
-              <label>
-                Lead hand
-                <select
-                  aria-label="Lead hand"
-                  value={stance}
-                  disabled={active || studio.status === "loading"}
-                  onChange={(e) => setStance(e.target.value as Stance)}
-                >
-                  <option value="orthodox">Left hand leads</option>
-                  <option value="southpaw">Right hand leads</option>
-                </select>
-              </label>
-              <label>
-                Round
-                <select
-                  aria-label="Round duration"
-                  value={duration}
-                  disabled={active || studio.status === "loading"}
-                  onChange={(e) => setDuration(Number(e.target.value))}
-                >
-                  <option value={30}>30 seconds</option>
-                  <option value={60}>1 minute</option>
-                  <option value={120}>2 minutes</option>
-                  <option value={180}>3 minutes</option>
-                </select>
-              </label>
-            </div>
-            <div className="action-group">
-              {readiness.pending ? (
-                <button className="button secondary" onClick={cancelCountdown}>
-                  Cancel countdown
-                </button>
-              ) : studio.running || finishing ? (
-                <button
-                  className="button stop"
-                  disabled={finishing}
-                  onClick={() => void stop()}
-                >
-                  <Square size={15} fill="currentColor" />
-                  {finishing ? "Saving…" : "Stop & save"}
-                </button>
-              ) : studio.status === "ready" ? (
-                <button className="button primary" onClick={record}>
-                  <Circle size={14} fill="currentColor" />
-                  {studio.source === "camera"
-                    ? "Record round"
-                    : studio.source === "file"
-                      ? "Analyze clip"
-                      : "Start demo"}
-                </button>
-              ) : null}
-              {studio.status !== "off" && !active && (
-                <button className="text-button" onClick={() => void stop()}>
-                  {studio.source === "camera" ? "Stop camera" : "Close source"}
-                </button>
-              )}
             </div>
           </div>
           <div className="practice-note">
@@ -424,21 +542,6 @@ function App() {
                 ? "Synthetic motion for trying the controls. No camera or accuracy measurement."
                 : "Record round gives you 8 seconds to step back, then saves video + tracking locally. No microphone."}
           </div>
-          {studio.running && (
-            <div className="live-counts">
-              <span>
-                <b>{studio.events.filter((e) => e.label === "jab").length}</b>{" "}
-                jabs
-              </span>
-              <span>
-                <b>{studio.events.filter((e) => e.label === "cross").length}</b>{" "}
-                crosses
-              </span>
-              <small>
-                Experimental counts · tracking is not a technique judgment
-              </small>
-            </div>
-          )}
           <details className="options" open={active ? false : undefined}>
             <summary>More options</summary>
             <div className="options-content">
@@ -543,7 +646,7 @@ function App() {
           />
         )}
       </main>
-      <footer>Local video. Experimental jab & cross detection.</footer>
+      <footer>Local video. Experimental punch recognition.</footer>
     </div>
   );
 }

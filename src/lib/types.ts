@@ -21,13 +21,14 @@ export interface PunchEvent {
   id: string;
   hand: "left" | "right";
   role: "lead" | "rear";
-  label: "jab" | "cross";
+  label: "jab" | "cross" | "hook" | "uppercut";
   startMs: number;
   peakMs: number;
   endMs: number;
   score: number; // heuristic signal score, NOT calibrated confidence
   extension: number;
-  // Spatial return to this event's origin observed by detectedAtMs; later return
+  // Spatial return to the detector's observed guard/recovery reference by
+  // detectedAtMs. A loaded curve's reference can precede startMs. Later return
   // is not assessed, and this is not a technique-quality judgment.
   guardReturn: "returned" | "not-observed" | "unassessable";
   experimental: true;
