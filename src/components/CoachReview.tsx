@@ -12,9 +12,9 @@ import { fingerprintVideo } from "../lib/mediaFingerprint";
 import { downloadBlob, formatTime } from "../lib/storage";
 import {
   addManualCard,
+  actionReviewed,
   answerGuard,
   answerIdentity,
-  cardComplete,
   createCoachReview,
   fingerprintCoachSource,
   identityName,
@@ -148,7 +148,7 @@ export function CoachReview({
             )
           : createCoachReview(source, videoSha, sessionSha);
         setData(review);
-        const next = review.cards.findIndex((c) => !cardComplete(c));
+        const next = review.cards.findIndex((c) => !actionReviewed(c));
         setIndex(Math.max(0, next));
         setBrowsing(review.cards.length === 0);
         setLoading(false);
@@ -259,6 +259,7 @@ export function CoachReview({
       await persistCoachReview(latest.current, next, onUpdate);
       if (!mounted.current) return;
       setData(next);
+      setEditingIdentity(false);
       setIndex(Math.max(0, Math.min(next.cards.length - 1, nextIndex)));
       setBrowsing(false);
       setRetry(null);
@@ -325,17 +326,17 @@ export function CoachReview({
       `coach-labels-${unsaved ? "unsaved-" : ""}${session.id}.json`,
     );
   }
-  const completed = data?.cards.filter(cardComplete).length ?? 0;
+  const completed = data?.cards.filter(actionReviewed).length ?? 0;
   const focusMoment =
     card?.proposal.kind === "detector-navigation"
       ? card.proposal.peakMs
       : card?.proposal.selectedAtMs;
 
   return (
-    <section className="coach-review" aria-label="Coach review">
+    <section className="coach-review" aria-label="Punch review">
       <header className="coach-review-header">
         <div>
-          <span className="eyebrow">Your coaching labels · local only</span>
+          <span className="eyebrow">Your movement labels · local only</span>
           <h2>Review the movement</h2>
         </div>
         <button
@@ -343,14 +344,15 @@ export function CoachReview({
           className="icon-button"
           onClick={onClose}
           disabled={navigationLocked}
-          aria-label="Close coach review"
+          aria-label="Close punch review"
         >
           <X size={20} />
         </button>
       </header>
       <p className="coach-intro">
-        Confirm the action, then judge one guard cue. Labels stay local and do
-        not train the model automatically.
+        Identify punches even when technique needs work. These labels help us
+        improve recognition; they do not make your movement a correct-form
+        example.
       </p>
       {error && (
         <p className="coach-error" role="alert">
@@ -484,7 +486,8 @@ export function CoachReview({
                     : data.cards.length
                       ? `Clip ${index + 1} of ${data.cards.length}`
                       : "No clips yet"}{" "}
-                  · {completed} reviewed
+                  · {completed} {completed === 1 ? "action" : "actions"}{" "}
+                  reviewed
                 </span>
                 <button
                   type="button"
@@ -573,14 +576,17 @@ export function CoachReview({
                   )}
                   {isStraight(card.identity) && !editingIdentity && (
                     <div className="coach-question coach-guard">
+                      <span className="eyebrow">Optional observation</span>
                       <h3>
                         Did the other hand stay in your intended high guard?
                       </h3>
                       <p>
-                        For an <strong>isolated straight</strong>. “Guard held”
-                        and “Needs work” mean this drill applies and you could
-                        see the hand clearly. “Needs work” means you would give
-                        a correction. Choose “Not this drill/style” for
+                        Your action label is saved. This observation is
+                        optional. For an{" "}
+                        <strong>isolated high-guard straight</strong>. “Guard
+                        held” and “Needs work” mean this drill applies and you
+                        could see the hand clearly. “Needs work” means you would
+                        give a correction. Choose “Not this drill/style” for
                         deliberate defense, another guard or a competing action.
                       </p>
                       <div
@@ -621,8 +627,7 @@ export function CoachReview({
                   <label className="coach-notes">
                     Notes{" "}
                     <span>
-                      (optional — acceptable variation or the cue you would
-                      give)
+                      (optional — what you noticed or an acceptable variation)
                     </span>
                     <textarea
                       aria-label="Coach notes"
@@ -695,7 +700,8 @@ export function CoachReview({
                 <span className="coach-save-status" role="status">
                   {saving
                     ? "Saving…"
-                    : notice || "Next leaves unanswered clips unreviewed"}
+                    : notice ||
+                      "Action labels save immediately. Guard review is optional."}
                 </span>
                 <button
                   type="button"
@@ -706,10 +712,9 @@ export function CoachReview({
                 </button>
               </footer>
               <p className="coach-small">
-                Selected clips are not a complete punch inventory. Your own
-                judgments are training material only after a separate, explicit
-                data review. Original video, events and reference annotations
-                stay intact.
+                Selected clips are not a complete punch inventory. Guard answers
+                are personal observations, not verified form references. Labels
+                stay local and do not train the model automatically.
               </p>
             </>
           )}

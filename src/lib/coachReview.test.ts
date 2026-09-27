@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   addManualCard,
+  actionReviewed,
   answerGuard,
   answerIdentity,
   cardComplete,
@@ -12,6 +13,7 @@ import {
   persistCoachReview,
   saveCardNote,
   validateCoachReview,
+  type CoachReviewData,
 } from "./coachReview";
 import type { Session, PunchEvent } from "./types";
 
@@ -70,6 +72,90 @@ function review(session = fixture()) {
 }
 
 describe("local coach labels", () => {
+  it("attributes new answers to the user without inventing coaching expertise or form gold", () => {
+    const session = fixture();
+    const data = review(session);
+    expect(data.schemaVersion).toBe("local-coach-review-2");
+    expect(data.reviewer).toEqual({
+      id: "local-user",
+      expertise: "user_review",
+    });
+    expect(data.provenance.formJudgments).toBe(
+      "provisional_not_correct_form_references",
+    );
+    expect(validateCoachReview(data, session)).toBe(data);
+    expect(() =>
+      validateCoachReview(
+        {
+          ...data,
+          reviewer: {
+            id: "local-user-coach",
+            expertise: "coach_self_reported",
+          },
+        },
+        session,
+      ),
+    ).toThrow(/Unsupported/);
+    expect(() =>
+      validateCoachReview(
+        {
+          ...data,
+          provenance: { ...data.provenance, formJudgments: undefined },
+        },
+        session,
+      ),
+    ).toThrow(/Unsupported/);
+  });
+  it("reads and edits legacy records without rewriting their historical authorship", async () => {
+    const session = fixture();
+    const initial = review(session);
+    const { formJudgments: _unused, ...provenance } = initial.provenance;
+    const legacy: CoachReviewData = {
+      ...initial,
+      schemaVersion: "local-coach-review-1",
+      reviewer: { id: "local-user-coach", expertise: "coach_self_reported" },
+      provenance,
+    };
+    const before = JSON.stringify(legacy);
+    expect(validateCoachReview(legacy, session)).toBe(legacy);
+    session.coachReview = legacy;
+    const edited = answerIdentity(
+      legacy,
+      legacy.cards[0].id,
+      "right-straight",
+      "",
+    );
+    const save = vi.fn(async () => {});
+    await persistCoachReview(session, edited, save);
+    expect(edited.schemaVersion).toBe("local-coach-review-1");
+    expect(edited.reviewer).toEqual(legacy.reviewer);
+    expect(edited.provenance).toEqual(provenance);
+    expect(JSON.stringify(legacy)).toBe(before);
+    expect(save.mock.calls[0]).toEqual([
+      { ...session, coachReview: edited },
+      legacy,
+    ]);
+  });
+  it("resumes action review after a saved straight without manufacturing an optional guard answer", () => {
+    const data = review({
+      ...fixture(),
+      events: [
+        event,
+        { ...event, id: "second", startMs: 1500, peakMs: 1700, endMs: 1900 },
+      ],
+    });
+    const next = answerIdentity(
+      data,
+      data.cards[0].id,
+      "right-straight",
+      "Technique needs work",
+    );
+    expect(next.cards.filter(actionReviewed)).toHaveLength(1);
+    expect(next.cards.findIndex((card) => !actionReviewed(card))).toBe(1);
+    expect(next.cards[0].guard).toBeNull();
+    expect(cardComplete(next.cards[0])).toBe(false);
+    expect(data.cards[0].identity).toBeNull();
+  });
   it("uses detections only to find clips and never prefills user judgments", () => {
     const session = fixture();
     const original = JSON.stringify(session.events);

@@ -346,7 +346,7 @@ export function RoundReview({
                   window.scrollTo({ top: 0, behavior: "instant" });
                 }}
               >
-                Coach review
+                Correct punches
               </button>
             )}
             <button className="button secondary" onClick={onPractice}>

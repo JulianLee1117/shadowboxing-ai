@@ -1,6 +1,7 @@
 import type { Session, Stance } from "./types";
 
-export const COACH_REVIEW_VERSION = "local-coach-review-1" as const;
+export const COACH_REVIEW_VERSION = "local-coach-review-2" as const;
+const LEGACY_COACH_REVIEW_VERSION = "local-coach-review-1" as const;
 export const GUARD_RUBRIC_VERSION = "isolated-high-guard-user-v1" as const;
 export type ActionIdentity =
   | "left-straight"
@@ -42,7 +43,9 @@ export interface CoachCard {
   updatedAt: string | null;
 }
 export interface CoachReviewData {
-  schemaVersion: typeof COACH_REVIEW_VERSION;
+  schemaVersion:
+    | typeof COACH_REVIEW_VERSION
+    | typeof LEGACY_COACH_REVIEW_VERSION;
   source: {
     sessionId: string;
     sessionFingerprint: string;
@@ -51,7 +54,11 @@ export interface CoachReviewData {
     durationMs: number;
     videoOffsetMs: number;
   };
-  reviewer: { id: "local-user-coach"; expertise: "coach_self_reported" };
+  // v1 assigned a coach role automatically. Keep that historical field intact,
+  // but never interpret it as a verified credential or correct-form reference.
+  reviewer:
+    | { id: "local-user"; expertise: "user_review" }
+    | { id: "local-user-coach"; expertise: "coach_self_reported" };
   provenance: {
     labels: "user-authored";
     proposalUse: "navigation_only_not_ground_truth";
@@ -59,6 +66,7 @@ export interface CoachReviewData {
     coverage: "selected_clips_not_complete_recording";
     bounds: "review_windows_not_verified_action_boundaries";
     training: "not_activated_or_automatically_used";
+    formJudgments?: "provisional_not_correct_form_references";
   };
   createdAt: string;
   updatedAt: string;
@@ -121,6 +129,10 @@ export function cardComplete(card: CoachCard) {
     card.identity !== null &&
     (!isStraight(card.identity) || card.guard !== null)
   );
+}
+/** Recognition corrections are useful without requiring a form judgment. */
+export function actionReviewed(card: CoachCard) {
+  return card.identity !== null;
 }
 /** Shared exact evidence/context serialization for hashing and atomic save comparison. */
 export function serializeCoachSource(session: Session): string {
@@ -217,7 +229,7 @@ export function createCoachReview(
       durationMs: session.durationMs,
       videoOffsetMs: session.videoOffsetMs ?? 0,
     },
-    reviewer: { id: "local-user-coach", expertise: "coach_self_reported" },
+    reviewer: { id: "local-user", expertise: "user_review" },
     provenance: {
       labels: "user-authored",
       proposalUse: "navigation_only_not_ground_truth",
@@ -225,6 +237,7 @@ export function createCoachReview(
       coverage: "selected_clips_not_complete_recording",
       bounds: "review_windows_not_verified_action_boundaries",
       training: "not_activated_or_automatically_used",
+      formJudgments: "provisional_not_correct_form_references",
     },
     createdAt: now,
     updatedAt: now,
@@ -239,7 +252,8 @@ export function validateCoachReview(
 ) {
   if (
     !data ||
-    data.schemaVersion !== COACH_REVIEW_VERSION ||
+    (data.schemaVersion !== COACH_REVIEW_VERSION &&
+      data.schemaVersion !== LEGACY_COACH_REVIEW_VERSION) ||
     data.source?.sessionId !== session.id ||
     data.source.stance !== session.stance ||
     data.source.durationMs !== session.durationMs ||
@@ -251,9 +265,17 @@ export function validateCoachReview(
       data.source.sessionFingerprint !== sessionFingerprint)
   )
     throw new Error("These coach labels do not match this original recording.");
+  const validReviewer =
+    data.schemaVersion === COACH_REVIEW_VERSION
+      ? data.reviewer?.id === "local-user" &&
+        data.reviewer.expertise === "user_review" &&
+        data.provenance?.formJudgments ===
+          "provisional_not_correct_form_references"
+      : data.reviewer?.id === "local-user-coach" &&
+        data.reviewer.expertise === "coach_self_reported";
   if (
     !Array.isArray(data.cards) ||
-    data.reviewer?.expertise !== "coach_self_reported" ||
+    !validReviewer ||
     data.provenance?.coverage !== "selected_clips_not_complete_recording"
   )
     throw new Error("Unsupported coach review data.");

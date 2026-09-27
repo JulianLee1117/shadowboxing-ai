@@ -97,7 +97,9 @@ async function openCoachFixture(page: Page) {
   });
   await page.reload();
   await page.getByRole("button", { name: /^Saved rounds/ }).click();
-  await page.getByRole("button", { name: "Coach review", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Correct punches", exact: true })
+    .click();
   await expect(
     page.getByRole("group", { name: "Actual punch identity" }),
   ).toBeVisible();
@@ -177,6 +179,14 @@ test("coach cards persist judgments, undo and missed moments without changing or
     .click();
   await identity.getByRole("button", { name: "Left jab", exact: true }).click();
   await expect(guard).toBeVisible();
+  await page
+    .getByRole("button", { name: "Change action", exact: true })
+    .click();
+  await identity.getByRole("button", { name: "Left jab", exact: true }).click();
+  await expect(guard).toBeVisible();
+  await expect(page.locator(".coach-confirmed-identity")).toContainText(
+    "Left jab",
+  );
   await guard.getByRole("button", { name: "Guard held", exact: true }).click();
   await expect(page.locator(".coach-progress")).toContainText("Clip 2 of 2");
   await page.getByRole("button", { name: "Undo", exact: true }).click();
@@ -211,7 +221,9 @@ test("coach cards persist judgments, undo and missed moments without changing or
     .getByRole("button", { name: "Right cross", exact: true })
     .click();
   await guard.getByRole("button", { name: "Can't tell", exact: true }).click();
-  await expect(page.locator(".coach-progress")).toContainText("3 reviewed");
+  await expect(page.locator(".coach-progress")).toContainText(
+    "3 actions reviewed",
+  );
   const downloadEvent = page.waitForEvent("download");
   await page
     .getByRole("button", { name: "Export labels", exact: true })
@@ -220,9 +232,15 @@ test("coach cards persist judgments, undo and missed moments without changing or
   const exported: CoachReviewData & { exportState: string } = JSON.parse(
     await readFile((await download.path())!, "utf8"),
   );
-  expect(exported.schemaVersion).toBe("local-coach-review-1");
+  expect(exported.schemaVersion).toBe("local-coach-review-2");
   expect(exported.source.videoSha256).toMatch(/^[a-f0-9]{64}$/);
-  expect(exported.reviewer.expertise).toBe("coach_self_reported");
+  expect(exported.reviewer).toEqual({
+    id: "local-user",
+    expertise: "user_review",
+  });
+  expect(exported.provenance.formJudgments).toBe(
+    "provisional_not_correct_form_references",
+  );
   expect(exported.cards[0].guard?.answer).toBe("not-applicable");
   expect(exported.cards[1].identity).toBe("right-hook");
   expect(exported.cards[1].proposal.kind).toBe("detector-navigation");
@@ -230,13 +248,17 @@ test("coach cards persist judgments, undo and missed moments without changing or
   expect(exported.cards[2].proposal.kind).toBe("manual-moment");
   expect(exported.cards[2].guard?.answer).toBe("unclear");
   await page
-    .getByRole("button", { name: "Close coach review", exact: true })
+    .getByRole("button", { name: "Close punch review", exact: true })
     .click();
   await expect(page.locator(".replay-stage video")).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: /^Saved rounds/ }).click();
-  await page.getByRole("button", { name: "Coach review", exact: true }).click();
-  await expect(page.locator(".coach-progress")).toContainText("3 reviewed");
+  await page
+    .getByRole("button", { name: "Correct punches", exact: true })
+    .click();
+  await expect(page.locator(".coach-progress")).toContainText(
+    "3 actions reviewed",
+  );
   const saved = await storedSession(page);
   expect(saved.events).toEqual(original.events);
   expect(saved.annotations).toEqual(original.annotations);
@@ -256,6 +278,41 @@ test("coach cards persist judgments, undo and missed moments without changing or
     path: test.info().outputPath("coach-review-desktop.png"),
     fullPage: true,
   });
+});
+
+test("action-only corrections survive reopening without requiring or implying correct form", async ({
+  page,
+}) => {
+  await openCoachFixture(page);
+  await expect(page.locator(".coach-intro")).toContainText(
+    "do not make your movement a correct-form example",
+  );
+  await page
+    .getByRole("group", { name: "Actual punch identity" })
+    .getByRole("button", { name: "Left jab", exact: true })
+    .click();
+  await expect(page.locator(".coach-progress")).toContainText(
+    "1 action reviewed",
+  );
+  await expect(
+    page.getByRole("group", { name: "Non-punching hand guard" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.locator(".coach-progress")).toContainText("Clip 2 of 2");
+  await page
+    .getByRole("button", { name: "Close punch review", exact: true })
+    .click();
+  await page.reload();
+  await page.getByRole("button", { name: /^Saved rounds/ }).click();
+  await page
+    .getByRole("button", { name: "Correct punches", exact: true })
+    .click();
+  await expect(page.locator(".coach-progress")).toContainText("Clip 2 of 2");
+  const review = (await storedSession(page)).coachReview!;
+  expect(review.cards[0].identity).toBe("left-straight");
+  expect(review.cards[0].guard).toBeNull();
+  expect(review.cards[1].identity).toBeNull();
+  expect(review.reviewer.expertise).toBe("user_review");
 });
 
 test("a failed coach-label write does not commit or advance and can be retried", async ({

@@ -18,10 +18,10 @@ Check these three things:
 
 Your recorded technique is not the reference standard. Imperfect punches still help test recognition; skilled external examples and assessed counterexamples are the priority for learning form. You do not need to label your own technique to unblock that work. See the [data plan](research/expert-reference-data.md).
 
-In **Saved rounds**, choose a recording and click **Coach review**. The original video appears without prediction overlays.
+In **Saved rounds**, choose a recording and click **Correct punches**. The original video appears without prediction overlays.
 
 1. Play the clip, use **0.5×** if useful, and inspect the marked moment. Confirm the physical hand and action, or choose **Not a punch** / **Can't tell**.
-2. For a straight, judge the **other hand**: **Guard held**, **Needs work**, **Can't tell**, or **Not this drill/style**. The first two mean an isolated high-guard straight with the hand clearly visible. A combination, intentional defense or different guard can be not applicable.
+2. A straight offers an **optional** observation about the **other hand**: **Guard held**, **Needs work**, **Can't tell**, or **Not this drill/style**. Use **Next** to skip it; your action label is already saved. The first two mean an isolated high-guard straight with the hand clearly visible. A combination, intentional defense or different guard can be not applicable.
 3. Use **Undo** for a misclick. **Next** can leave a card unanswered. Answers save locally; reload once to check they remain.
 4. Use **Find a missed punch**, scrub the full video, and **Review this moment** to add something the detector missed. Adding a window does not label it automatically.
 
@@ -31,6 +31,6 @@ Labels are supervised review material, not an automatic model update or a techni
 
 ## Replay and backup
 
-Closing Coach review returns to the original replay with tracking available. **Re-run analysis** remains optional; different counts alone do not prove improvement. Saved-round remove buttons support **Undo** and **Recently deleted**.
+Closing punch review returns to the original replay with tracking available. **Re-run analysis** remains optional; different counts alone do not prove improvement. Saved-round remove buttons support **Undo** and **Recently deleted**.
 
 **Export labels** saves coaching judgments. Under the normal review's **Export & details**, keep **Evidence JSON** and **Export video** together for a backup. Browser storage stays local and can be cleared by the browser.
