@@ -69,6 +69,8 @@ npm run benchmark -- /path/to/day1-labeled.json /path/to/day2-labeled.json \
 
 `diagnose` reports tracking and timing. `evaluate` reports recognition metrics only with complete reference labels or an explicit completeness assertion. `benchmark` preserves inputs and compares saved/current detections on unchanged poses, including recovered/lost actions and false detections. These are development tools; see [benchmarking](docs/benchmarking.md).
 
+The native personal model has a separate reproducible workflow: [train from pinned recordings](docs/personal-training.md), then [replay baseline and candidate bundles](docs/personal-replay.md) on the same saved poses. Training respects whole-recording splits and unknown intervals; neither command changes the active model. [Recognition evaluation](docs/recognition-evaluation.md) keeps strict interval matching separate from a fixed peak-time diagnostic for live counting. Original recorded decisions always remain distinct from a replay started without pre-round history.
+
 ## Development workflow
 
 This project uses direct commits and pushes to **`main`**, as requested by its owner; do not open a pull request for routine changes. Review the diff, run the relevant checks above, then commit and push the reviewed source, tests and documentation to `main`. Keep recordings, personal exports, datasets, model weights and generated reports in ignored locations. Inspect staged files before committing; never stage private artifacts as part of a broad add.

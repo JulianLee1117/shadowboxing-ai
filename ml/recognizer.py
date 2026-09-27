@@ -20,7 +20,7 @@ FEATURE_VERSION = "arm-offsets-native-v3"
 MAXIMUM_GAP_MS = 150
 HISTORY_MS = 4200
 LOOKAHEAD_MS = 300
-DECODER_VERSION = "observed-personal-cycles-v3"
+DECODER_VERSION = "observed-personal-cycles-v4"
 
 
 def _digest(path):
@@ -327,6 +327,80 @@ class RecognizerSession:
     def dispose(self):
         self.reset()
 
+    def _complete_observed_straight_cycle(self, state, h, t):
+        """Keep an observed completed cycle before discarding an overlong run.
+
+        Uses the same repeat-peak shape/prominence/cadence gates as closure.
+        No new peak, joint, or return is inferred from a class-probability gap.
+        """
+        if state["label"] != 1:
+            return False
+        observed = []
+        previous = None
+        for sample in self.grid:
+            if not state["start"] <= sample["t"] <= state["last"]:
+                continue
+            source_t = sample.get("_sourceT", sample["t"])
+            if source_t != previous:
+                observed.append({**sample, "t": source_t})
+                previous = source_t
+        if len(observed) < 5:
+            return False
+        _, geometry, scores = self.bundle.classification_features(observed)
+        points = geometry[:, h]
+        valid = self.bundle.np.isfinite(points).all(1) & (
+            scores[:, [h, 2 + h, 4 + h]].min(1) >= 0.55
+        )
+        ids = self.bundle.np.flatnonzero(valid)
+        if len(ids) < 5:
+            return False
+        reach = points[ids, 4]
+        peaks, _ = self.bundle.signal.find_peaks(reach, prominence=0.20)
+        peaks = [int(v) for v in peaks
+                 if points[ids[v], 5] >= 100
+                 and points[ids[v], 4] >= 0.55
+                 and points[ids[v], 1] <= 0.65]
+        selected = []
+        for v in sorted(peaks, key=lambda value: reach[value], reverse=True):
+            if all(abs(observed[ids[v]]["t"] - observed[ids[q]]["t"]) >= 180
+                   for q in selected):
+                selected.append(v)
+        selected.sort()
+        if len(selected) < 2:
+            return False
+        first, second = selected[:2]
+        if any(observed[ids[k + 1]]["t"] - observed[ids[k]]["t"] > 100
+               for k in range(first, second)):
+            return False
+        valley = int(first + self.bundle.np.argmin(reach[first:second + 1]))
+        start = state["sourceStart"]
+        peak = observed[ids[first]]["t"]
+        end = observed[ids[valley]]["t"]
+        if not start <= peak < end or not 66 <= end - start <= 1800:
+            return False
+        first_evidence = [p for p in self.predictions
+                          if start <= p["sourceT"] <= end and p["valid"][h]
+                          and int(p["p"][h].argmax()) == 1 and p["p"][h, 1] >= .65]
+        remaining = [p for p in self.predictions
+                     if end <= p["sourceT"] <= state["sourceLast"] and p["valid"][h]
+                     and int(p["p"][h].argmax()) == 1 and p["p"][h, 1] >= .65]
+        if len({p["sourceT"] for p in first_evidence}) < 3 or len({p["sourceT"] for p in remaining}) < 3:
+            return False
+        self.pending.append({
+            "hand": "left" if h == 0 else "right", "family": "straight",
+            "startMs": start, "peakMs": peak, "endMs": end,
+            "score": max(float(p["p"][h, 1]) for p in first_evidence),
+            "_proposal": "temporal", "_ready": max(t, end + LOOKAHEAD_MS),
+        })
+        best = max(remaining, key=lambda p: p["p"][h, 1])
+        state.update({
+            "start": remaining[0]["t"], "sourceStart": end,
+            "frames": len(remaining), "sourceCount": len({p["sourceT"] for p in remaining}),
+            "peak": best["t"], "score": float(best["p"][h, 1]),
+            "gap": None, "uncertainSince": None,
+        })
+        return True
+
     def _curves_at(self, probabilities, valid, frame):
         t = frame["t"]
         for h, hand in enumerate(("left", "right")):
@@ -377,7 +451,8 @@ class RecognizerSession:
                     state["score"] = float(p[label])
                     state["peak"] = t
                 if t - state["start"] > 1800:
-                    self.curves[h] = None
+                    if not self._complete_observed_straight_cycle(state, h, t):
+                        self.curves[h] = None
                 continue
             if state["gap"] is None:
                 state["gap"] = t

@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 from collections import deque
 from datetime import datetime, timezone
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -20,6 +21,8 @@ JOINTS = {"nose": 0, "leftShoulder": 11, "rightShoulder": 12,
           "leftKnee": 25, "rightKnee": 26, "leftAnkle": 27, "rightAnkle": 28}
 DEFAULT_JOINTS = (11, 12, 13, 14, 15, 16, 23, 24)
 PUNCH_LABELS = ("jab", "cross", "hook", "uppercut")
+PEAK_TOLERANCE_MS = 250
+PEAK_FIELDS = ("peakMs", "peakTMs", "approximatePeakMs")
 
 
 def finite(value: Any) -> bool:
@@ -121,6 +124,200 @@ def scores(tp: int, fp: int, fn: int, exposure_ms: float) -> dict:
             "recall": tp / (tp + fn) if tp + fn else None,
             "f1": 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else None,
             "falseEventsPerMinute": fp * 60000 / exposure_ms if exposure_ms > 0 else None}
+
+
+def punch_family(event: dict) -> str:
+    return "straight" if event["label"] in ("jab", "cross") else event["label"]
+
+
+def explicit_peak(item: dict, name: str) -> float | None:
+    """Read an observed source-time peak; never infer one from boundaries."""
+    values = [number(item[key], f"{name}.{key}") for key in PEAK_FIELDS if key in item]
+    if values and any(value != values[0] for value in values):
+        raise ValueError(f"{name} has conflicting explicit peak fields")
+    return values[0] if values else None
+
+
+def reference_peaks(session: dict, reference: dict | None) -> tuple[dict[str, float], dict]:
+    annotations = {a["id"]: a for a in session["annotations"]}
+    peaks = {}
+
+    def add(item: dict, name: str) -> None:
+        if not isinstance(item, dict):
+            raise ValueError(f"{name} must be an object")
+        peak = explicit_peak(item, name)
+        if peak is None:
+            return
+        identity = item.get("annotationId", item.get("id"))
+        if identity not in annotations:
+            raise ValueError(f"{name} peak has no matching annotation ID")
+        annotation = annotations[identity]
+        for key in ("label", "hand", "startMs", "endMs"):
+            if key in item and item[key] != annotation[key]:
+                raise ValueError(f"{name} changes the stored annotation {key}")
+        if not annotation["startMs"] <= peak <= annotation["endMs"]:
+            raise ValueError(f"{name} peak must lie within its annotation interval")
+        if identity in peaks and peaks[identity] != peak:
+            raise ValueError(f"{name} conflicts with another explicit reference peak")
+        peaks[identity] = peak
+
+    for annotation in session["annotations"]:
+        add(annotation, f"annotations.{annotation['id']}")
+    provenance = {"kind": "inline_annotation_peaks", "referenceContentSha256": None}
+    if reference is not None:
+        if not isinstance(reference, dict):
+            raise ValueError("Peak reference must be an object")
+        for key in ("sessionId", "sourceSessionId"):
+            if key in reference and reference[key] not in (session["id"], session.get("benchmark", {}).get("sourceSessionId")):
+                raise ValueError("Peak reference session identity does not match")
+        source_hash = session.get("benchmark", {}).get("sourceVideoSha256")
+        if source_hash and reference.get("sourceVideoSha256") not in (None, source_hash):
+            raise ValueError("Peak reference source video fingerprint does not match")
+        arrays = ("annotations", "actionObservations", "approximatePeaks", "peaks")
+        if not any(key in reference for key in arrays):
+            raise ValueError("Peak reference requires annotations, actionObservations, approximatePeaks or peaks")
+        unscored_observations = []
+        for key in arrays:
+            if key not in reference:
+                continue
+            if not isinstance(reference[key], list):
+                raise ValueError(f"Peak reference {key} must be an array")
+            for i, item in enumerate(reference[key]):
+                if (key == "actionObservations" and isinstance(item, dict)
+                        and item.get("annotationId", item.get("id")) not in annotations):
+                    # Raw video notes may include ambiguous actions deliberately
+                    # excluded from the frozen scored annotations. Never add them.
+                    unscored_observations.append(item.get("annotationId", item.get("id")))
+                    continue
+                add(item, f"peakReference.{key}[{i}]")
+        provenance = {"kind": "explicit_reference_plus_inline_annotation_peaks",
+                      "referenceContentSha256": hashlib.sha256(json.dumps(
+                          reference, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest(),
+                      "sourceVideoSha256": reference.get("sourceVideoSha256"),
+                      "unscoredReferenceObservationIds": unscored_observations,
+                      "labelProvenance": reference.get("labelProvenance", reference.get("status"))}
+    return peaks, provenance
+
+
+def match_peak_events(predictions: list[dict], truths: list[dict], *, identity: bool = True) -> list[tuple[int, int]]:
+    """Maximum cardinality within the fixed inclusive source-peak tolerance.
+
+    Inputs contain validated explicit peakMs values. Closest edges are visited
+    first, with input-index ties; minimum total timing error is not guaranteed.
+    identity=False is only for descriptive unmatched-event confusion analysis.
+    """
+    edges = [sorted([g for g, truth in enumerate(truths)
+                     if abs(prediction["peakMs"] - truth["peakMs"]) <= PEAK_TOLERANCE_MS
+                     and (not identity or (prediction["hand"] == truth["hand"]
+                          and punch_family(prediction) == punch_family(truth)))],
+                    key=lambda g: (abs(prediction["peakMs"] - truths[g]["peakMs"]), g))
+             for prediction in predictions]
+    p_to_g, g_to_p = {}, {}
+    for start in range(len(predictions)):
+        queue, seen_p, via_g, free_g = deque([start]), {start}, {}, None
+        while queue and free_g is None:
+            p = queue.popleft()
+            for g in edges[p]:
+                if g in via_g:
+                    continue
+                via_g[g] = p
+                if g not in g_to_p:
+                    free_g = g
+                    break
+                next_p = g_to_p[g]
+                if next_p not in seen_p:
+                    seen_p.add(next_p)
+                    queue.append(next_p)
+        if free_g is not None:
+            g = free_g
+            while True:
+                p = via_g[g]
+                previous_g = p_to_g.get(p)
+                p_to_g[p], g_to_p[g] = g, p
+                if previous_g is None:
+                    break
+                g = previous_g
+    return sorted(p_to_g.items())
+
+
+def peak_timing(matches: list[dict]) -> dict:
+    fields = ("peakErrorMs", "absolutePeakErrorMs", "startErrorMs", "endErrorMs",
+              "sourcePeakToEmissionMs", "predictedPeakToEmissionMs", "referenceEndToEmissionMs")
+    return {key: distribution([m[key] for m in matches if key in m]) for key in fields}
+
+
+def peak_occurrence_diagnostics(session: dict, predictions: list[dict], truths: list[dict],
+                                exposure: float, reference: dict | None, strict: dict) -> dict:
+    peaks, provenance = reference_peaks(session, reference)
+    missing_truth = [a["id"] for a in truths if a["id"] not in peaks]
+    eligible_truths = [{**a, "peakMs": peaks[a["id"]]} for a in truths if a["id"] in peaks]
+    eligible_predictions, missing_prediction = [], []
+    for prediction in predictions:
+        peak = explicit_peak(prediction, f"events.{prediction['id']}")
+        if peak is None:
+            missing_prediction.append(prediction["id"])
+            continue
+        if not prediction["startMs"] <= peak <= prediction["endMs"]:
+            raise ValueError(f"events.{prediction['id']} peak must lie within its event interval")
+        if "detectedAtMs" in prediction and prediction["detectedAtMs"] < prediction["endMs"]:
+            raise ValueError(f"events.{prediction['id']} emission precedes its event end")
+        eligible_predictions.append({**prediction, "peakMs": peak})
+    pairs = match_peak_events(eligible_predictions, eligible_truths)
+    matched_p, matched_g = {p for p, _ in pairs}, {g for _, g in pairs}
+    matches = []
+    strict_pairs = {(m["eventId"], m["annotationId"]) for m in strict["matches"]}
+    for p, g in pairs:
+        prediction, truth = eligible_predictions[p], eligible_truths[g]
+        error = prediction["peakMs"] - truth["peakMs"]
+        item = {"eventId": prediction["id"], "annotationId": truth["id"],
+                "family": punch_family(truth), "hand": truth["hand"],
+                "peakErrorMs": error, "absolutePeakErrorMs": abs(error),
+                "startErrorMs": prediction["startMs"] - truth["startMs"],
+                "endErrorMs": prediction["endMs"] - truth["endMs"],
+                "tIoU": temporal_iou(prediction, truth),
+                "alsoStrictMatchedPair": (prediction["id"], truth["id"]) in strict_pairs}
+        if "detectedAtMs" in prediction:
+            item.update(sourcePeakToEmissionMs=prediction["detectedAtMs"] - truth["peakMs"],
+                        predictedPeakToEmissionMs=prediction["detectedAtMs"] - prediction["peakMs"],
+                        referenceEndToEmissionMs=prediction["detectedAtMs"] - truth["endMs"])
+        matches.append(item)
+    unmatched_p = [p for i, p in enumerate(eligible_predictions) if i not in matched_p]
+    unmatched_g = [g for i, g in enumerate(eligible_truths) if i not in matched_g]
+    complete = not missing_truth and not missing_prediction
+    metrics = scores(len(pairs), len(unmatched_p), len(unmatched_g), exposure) if complete else None
+    if metrics is not None:
+        metrics["evaluatedExposureMs"] = exposure
+        metrics["perPhysicalHandFamily"] = {}
+        for hand in ("left", "right"):
+            for family in ("straight", "hook", "uppercut"):
+                selected = lambda item: item["hand"] == hand and punch_family(item) == family
+                metrics["perPhysicalHandFamily"][f"{hand}:{family}"] = scores(
+                    sum(selected(eligible_truths[g]) for _, g in pairs),
+                    sum(selected(p) for p in unmatched_p), sum(selected(g) for g in unmatched_g), exposure)
+    confusions = []
+    for p, g in match_peak_events(unmatched_p, unmatched_g, identity=False):
+        prediction, truth = unmatched_p[p], unmatched_g[g]
+        confusions.append({"eventId": prediction["id"], "annotationId": truth["id"],
+                           "predictedHand": prediction["hand"], "referenceHand": truth["hand"],
+                           "predictedFamily": punch_family(prediction), "referenceFamily": punch_family(truth),
+                           "wrongHand": prediction["hand"] != truth["hand"],
+                           "wrongFamily": punch_family(prediction) != punch_family(truth),
+                           "peakErrorMs": prediction["peakMs"] - truth["peakMs"]})
+    return {"protocolVersion": "peak-occurrence-development-v1", "validationStatus": "development_diagnostic_pending_fresh_future_data",
+            "status": "scored" if complete else "withheld_missing_explicit_peaks",
+            "toleranceMs": PEAK_TOLERANCE_MS, "reference": provenance,
+            "matching": "maximum_cardinality_physical_hand_and_family_inclusive_peak_tolerance",
+            "familyMapping": "jab/cross -> straight; hook -> hook; uppercut -> uppercut",
+            "missingReferencePeakIds": missing_truth, "missingPredictionPeakIds": missing_prediction,
+            "referencePeakCoverage": {"available": len(eligible_truths), "required": len(truths)},
+            "predictionPeakCoverage": {"available": len(eligible_predictions), "required": len(predictions)},
+            "metrics": metrics, "matches": matches, "timingMs": peak_timing(matches),
+            "unmatchedPredictionIds": [p["id"] for p in unmatched_p],
+            "unmatchedReferenceIds": [g["id"] for g in unmatched_g],
+            "confusionAssociations": confusions,
+            "confusionInterpretation": "Secondary one-to-one time-only associations among unmatched events; not verified error causes. Never add these to true positives.",
+            "timingInterpretation": "Observed reference peak to source-clock emission, not sensor-to-display latency. Partial-reference timing uses available matched peaks only.",
+            "scope": "Same full-session predictions, recall labels and exclusion intervals as strict metrics. Does not establish full action timing or correct technique."}
 
 
 BROWSER_MODELS = ("lite", "full", "heavy", "synthetic", "rtmpose-m", "rtmw-l")
@@ -309,7 +506,7 @@ def evaluate_session(session: dict, *, annotations_complete: bool = False,
                      allow_synthetic: bool = False, threshold: float = .5,
                      labels: tuple[str, ...] = ("jab", "cross"),
                      required_joints: tuple[int, ...] = DEFAULT_JOINTS,
-                     min_confidence: float = .5) -> dict:
+                     min_confidence: float = .5, peak_reference: dict | None = None) -> dict:
     validate_session(session, allow_synthetic)
     if "annotationsComplete" in session and not isinstance(session["annotationsComplete"], bool):
         raise ValueError("annotationsComplete must be an explicit boolean")
@@ -337,7 +534,7 @@ def evaluate_session(session: dict, *, annotations_complete: bool = False,
                          "processedFrameAgeMs": distribution([f["frameAgeMs"] for f in frames if "frameAgeMs" in f]),
                          "frameAgeDefinition": "browser_frame_callback_to_completed_inference_not_sensor_latency",
                          "eventFinalizationDelayMs": None},
-              "eventMetrics": None,
+              "eventMetrics": None, "peakOccurrenceDiagnostics": None,
               "warnings": ["Pose coverage measures processed frames only; it does not certify coaching criterion coverage.",
                            "Inference time is not processed-frame age or end-to-end camera latency.",
                            "Recognition metrics do not establish critique correctness or learning benefit."]}
@@ -380,6 +577,8 @@ def evaluate_session(session: dict, *, annotations_complete: bool = False,
                                            "endErrorMs": predictions[p]["endMs"] - truths[g]["endMs"]} for p, g in pairs],
                               "falsePositiveIds": [p["id"] for i, p in enumerate(predictions) if i not in matched_p],
                               "falseNegativeIds": [a["id"] for i, a in enumerate(truths) if i not in matched_g]}
+    result["peakOccurrenceDiagnostics"] = peak_occurrence_diagnostics(
+        session, predictions, truths, exposure, peak_reference, result["eventMetrics"])
     # Optional future telemetry must use the same source-relative clock as annotations.
     delays = [predictions[p]["detectedAtMs"] - truths[g]["endMs"] for p, g in pairs if "detectedAtMs" in predictions[p]]
     if delays:
@@ -389,14 +588,17 @@ def evaluate_session(session: dict, *, annotations_complete: bool = False,
     return result
 
 
-def build_report(sessions: list[dict], **options) -> dict:
+def build_report(sessions: list[dict], *, peak_references: dict[str, dict] | None = None, **options) -> dict:
     if not sessions:
         raise ValueError("Provide at least one session")
     if any(not isinstance(s, dict) for s in sessions):
         raise ValueError("Each input file must contain one session object")
     if len({s.get("id") for s in sessions}) != len(sessions):
         raise ValueError("Duplicate session IDs would double-count evidence")
-    results = [evaluate_session(s, **options) for s in sessions]
+    if peak_references is not None and (not isinstance(peak_references, dict)
+            or any(key not in {s.get("id") for s in sessions} for key in peak_references)):
+        raise ValueError("peak_references must map input session IDs to reference objects")
+    results = [evaluate_session(s, peak_reference=(peak_references or {}).get(s["id"]), **options) for s in sessions]
     metrics = [r["eventMetrics"] for r in results if r["eventMetrics"] is not None]
     aggregate = None
     if metrics:
@@ -406,6 +608,16 @@ def build_report(sessions: list[dict], **options) -> dict:
         class_names = sorted({name for m in metrics for name in m["perClass"]})
         aggregate["perClass"] = {name: scores(*(sum(m["perClass"].get(name, {}).get(key, 0) for m in metrics)
                                                     for key in ("tp", "fp", "fn")), exposure) for name in class_names}
+    peak_diagnostics = [r["peakOccurrenceDiagnostics"] for r in results]
+    peak_aggregate = None
+    if all(d is not None and d["metrics"] is not None for d in peak_diagnostics):
+        peak_metrics = [d["metrics"] for d in peak_diagnostics]
+        exposure = sum(m["evaluatedExposureMs"] for m in peak_metrics)
+        peak_aggregate = {**scores(*(sum(m[k] for m in peak_metrics) for k in ("tp", "fp", "fn")), exposure),
+                          "evaluatedExposureMs": exposure}
+        peak_aggregate["perPhysicalHandFamily"] = {name: scores(
+            *(sum(m["perPhysicalHandFamily"][name][k] for m in peak_metrics) for k in ("tp", "fp", "fn")), exposure)
+            for name in peak_metrics[0]["perPhysicalHandFamily"]}
     return {"reportVersion": "1.0", "createdAt": datetime.now(timezone.utc).isoformat(),
             "status": "synthetic_software_check" if any(r["synthetic"] for r in results)
             else "annotated_benchmark" if len(metrics) == len(results)
@@ -418,6 +630,14 @@ def build_report(sessions: list[dict], **options) -> dict:
                          "ignorePolicy": "prediction_fully_contained_in_unobservable_or_unknown_hand_interval",
                          "recallScope": "selected_labels_only; unsupported punches remain negative examples for selected labels"},
             "sessionCount": len(results), "accuracySessionCount": len(metrics), "eventMetrics": aggregate,
+            "peakOccurrenceDiagnostics": {
+                "protocolVersion": "peak-occurrence-development-v1",
+                "validationStatus": "development_diagnostic_pending_fresh_future_data",
+                "toleranceMs": PEAK_TOLERANCE_MS, "metrics": peak_aggregate,
+                "status": "scored" if peak_aggregate is not None else "withheld_incomplete_annotations_or_peaks",
+                "scoredSessionCount": sum(d is not None and d["metrics"] is not None for d in peak_diagnostics),
+                "timingMs": peak_timing([m for d in peak_diagnostics if d is not None for m in d["matches"]]),
+                "timingScope": "available explicitly peaked matched occurrences; may be a subset when aggregate metrics are withheld"},
             "inferenceMs": distribution([f["inferenceMs"] for s in sessions for f in s["frames"]]),
             "sessions": results}
 
@@ -432,6 +652,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--labels", default="jab,cross", help="Comma-separated recall scope; default jab,cross")
     parser.add_argument("--min-confidence", type=float, default=.5)
     parser.add_argument("--required-joints", default=",".join(map(str, DEFAULT_JOINTS)), help="MediaPipe indices for processed-frame coverage")
+    parser.add_argument("--peak-reference", action="append", type=Path,
+                        help="Explicit video-only peak reference; repeat once per input path, in the same order. Does not replace annotations.")
     args = parser.parse_args(argv)
     try:
         if not 0 < args.tiou <= 1 or not 0 <= args.min_confidence <= 1:
@@ -442,15 +664,20 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--labels must select jab,cross,hook,uppercut")
         if not joints or any(j < 0 or j > 32 for j in joints):
             raise ValueError("--required-joints must select MediaPipe indices 0..32")
-        if args.output.resolve() in [path.resolve() for path in args.paths]:
-            raise ValueError("Output must not overwrite an input session")
+        if args.peak_reference and len(args.peak_reference) != len(args.paths):
+            raise ValueError("Provide one --peak-reference per input path, in input order")
+        if args.output.resolve() in [path.resolve() for path in args.paths + (args.peak_reference or [])]:
+            raise ValueError("Output must not overwrite an input session or peak reference")
         sessions = []
         for path in args.paths:
             try:
                 sessions.append(json.loads(path.read_text()))
             except (OSError, json.JSONDecodeError) as error:
                 raise ValueError(f"{path}: {error}") from error
-        report = build_report(sessions, annotations_complete=args.annotations_complete,
+        if args.peak_reference and any(not isinstance(s, dict) or not isinstance(s.get("id"), str) for s in sessions):
+            raise ValueError("Peak references require session objects with string IDs")
+        references = {s["id"]: json.loads(path.read_text()) for s, path in zip(sessions, args.peak_reference or [])}
+        report = build_report(sessions, peak_references=references, annotations_complete=args.annotations_complete,
                               allow_synthetic=args.allow_synthetic, threshold=args.tiou,
                               labels=labels, required_joints=joints, min_confidence=args.min_confidence)
         args.output.parent.mkdir(parents=True, exist_ok=True)

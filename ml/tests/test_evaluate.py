@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from ml.evaluate import build_report, evaluate_session, main, match_events, percentile, temporal_iou
+from ml.evaluate import build_report, evaluate_session, main, match_events, match_peak_events, percentile, temporal_iou
 
 
 def event(event_id="p1", start=100, end=300, label="jab", hand="left"):
@@ -248,6 +248,178 @@ class EvaluationTests(unittest.TestCase):
             report = json.loads(output.read_text())
             self.assertEqual(report["status"], "capture_quality_only")
             self.assertIsNone(report["eventMetrics"])
+
+
+class PeakOccurrenceTests(unittest.TestCase):
+    def fixture(self):
+        s = session()
+        s["annotationsComplete"] = True
+        s["annotations"] = [{**event("a1", 100, 800), "peakMs": 400}]
+        s["events"] = [{**event("p1", 350, 500), "peakMs": 420, "detectedAtMs": 900}]
+        return s
+
+    def diagnostic(self, s, **kwargs):
+        return evaluate_session(s, labels=("jab", "cross", "hook", "uppercut"), **kwargs)["peakOccurrenceDiagnostics"]
+
+    def test_short_interval_can_match_peak_without_changing_strict_score(self):
+        s = self.fixture()
+        result = evaluate_session(s)
+        self.assertEqual((result["eventMetrics"]["tp"], result["eventMetrics"]["fp"], result["eventMetrics"]["fn"]), (0, 1, 1))
+        d = result["peakOccurrenceDiagnostics"]
+        self.assertEqual((d["metrics"]["tp"], d["metrics"]["fp"], d["metrics"]["fn"]), (1, 0, 0))
+        self.assertFalse(d["matches"][0]["alsoStrictMatchedPair"])
+        self.assertEqual(d["timingMs"]["peakErrorMs"]["p50"], 20)
+        self.assertEqual(d["timingMs"]["sourcePeakToEmissionMs"]["p50"], 500)
+        self.assertEqual(d["timingMs"]["predictedPeakToEmissionMs"]["p50"], 480)
+        self.assertEqual(d["timingMs"]["referenceEndToEmissionMs"]["p50"], 100)
+
+    def test_duplicate_predictions_only_match_one_occurrence(self):
+        s = self.fixture()
+        s["events"].append({**s["events"][0], "id": "duplicate"})
+        d = self.diagnostic(s)
+        self.assertEqual((d["metrics"]["tp"], d["metrics"]["fp"], d["metrics"]["fn"]), (1, 1, 0))
+        self.assertEqual(len(d["matches"]), 1)
+        self.assertEqual(d["confusionAssociations"], [])
+
+    def test_wrong_hand_and_family_remain_errors_with_separate_confusion(self):
+        for hand, label, wrong_hand, wrong_family in [
+            ("right", "jab", True, False), ("left", "hook", False, True), ("right", "uppercut", True, True)
+        ]:
+            with self.subTest(hand=hand, label=label):
+                s = self.fixture()
+                s["events"][0].update(hand=hand, label=label)
+                d = self.diagnostic(s)
+                self.assertEqual((d["metrics"]["tp"], d["metrics"]["fp"], d["metrics"]["fn"]), (0, 1, 1))
+                self.assertEqual(len(d["confusionAssociations"]), 1)
+                confusion = d["confusionAssociations"][0]
+                self.assertEqual((confusion["wrongHand"], confusion["wrongFamily"]), (wrong_hand, wrong_family))
+
+    def test_jab_cross_share_family_but_not_strict_label(self):
+        s = self.fixture()
+        s["events"][0].update(label="cross", startMs=100, endMs=800)
+        r = evaluate_session(s)
+        self.assertEqual(r["eventMetrics"]["tp"], 0)
+        self.assertEqual(r["peakOccurrenceDiagnostics"]["metrics"]["tp"], 1)
+
+    def test_fixed_250ms_tolerance_inclusive_both_directions(self):
+        for error, expected in [(-250, 1), (250, 1), (-250.001, 0), (250.001, 0)]:
+            s = self.fixture()
+            s["events"][0].update(startMs=100, endMs=800, peakMs=400 + error)
+            self.assertEqual(self.diagnostic(s)["metrics"]["tp"], expected)
+
+    def test_peak_assignment_maximizes_cardinality_not_greedy_nearest(self):
+        predictions = [{**event("p1", 0, 900), "peakMs": 450}, {**event("p2", 0, 900), "peakMs": 200}]
+        truths = [{**event("a1", 0, 900), "peakMs": 400}, {**event("a2", 0, 900), "peakMs": 650}]
+        self.assertEqual(set(match_peak_events(predictions, truths)), {(0, 1), (1, 0)})
+
+    def test_missing_peaks_withhold_metrics_without_fabricating_midpoint(self):
+        for field, expected_key in [("annotations", "missingReferencePeakIds"), ("events", "missingPredictionPeakIds")]:
+            s = self.fixture()
+            del s[field][0]["peakMs"]
+            d = self.diagnostic(s)
+            self.assertIsNone(d["metrics"])
+            self.assertEqual(d["status"], "withheld_missing_explicit_peaks")
+            self.assertEqual(d[expected_key], [s[field][0]["id"]])
+            self.assertEqual(d["matches"], [])
+            self.assertIsNone(d["timingMs"]["sourcePeakToEmissionMs"]["p50"])
+
+    def test_invalid_or_conflicting_peaks_error(self):
+        for field in ("events", "annotations"):
+            for value in (None, True, float("nan"), float("inf"), -1, 999):
+                with self.subTest(field=field, value=value):
+                    s = self.fixture()
+                    s[field][0]["peakMs"] = value
+                    with self.assertRaises(ValueError):
+                        self.diagnostic(s)
+        s = self.fixture()
+        s["annotations"][0]["peakTMs"] = 401
+        with self.assertRaisesRegex(ValueError, "conflicting"):
+            self.diagnostic(s)
+
+    def test_delivery_clock_never_substitutes_for_missing_source_peak(self):
+        s = self.fixture()
+        s["events"][0]["detectedAtMs"] = 1000
+        self.assertEqual(self.diagnostic(s)["metrics"]["tp"], 1)
+        self.assertEqual(self.diagnostic(s)["timingMs"]["sourcePeakToEmissionMs"]["p50"], 600)
+        del s["events"][0]["peakMs"]
+        s["events"][0]["detectedAtMs"] = 400
+        self.assertIsNone(self.diagnostic(s)["metrics"])
+
+    def test_missing_emission_telemetry_is_not_invented_and_early_emission_errors(self):
+        s = self.fixture()
+        del s["events"][0]["detectedAtMs"]
+        self.assertEqual(self.diagnostic(s)["timingMs"]["sourcePeakToEmissionMs"]["count"], 0)
+        s["events"][0]["detectedAtMs"] = 499
+        with self.assertRaisesRegex(ValueError, "emission precedes"):
+            self.diagnostic(s)
+
+    def test_external_reference_aliases_preserve_source_and_strict_metric(self):
+        for collection, peak_key, id_key in [("actionObservations", "peakMs", "id"),
+                                             ("approximatePeaks", "approximatePeakMs", "annotationId"),
+                                             ("peaks", "peakTMs", "annotationId")]:
+            s = self.fixture()
+            del s["annotations"][0]["peakMs"]
+            original = copy.deepcopy(s)
+            reference = {"sessionId": s["id"], collection: [{id_key: "a1", peak_key: 400}]}
+            r = evaluate_session(s, peak_reference=reference)
+            self.assertEqual(r["peakOccurrenceDiagnostics"]["metrics"]["tp"], 1)
+            self.assertEqual(s, original)
+            self.assertEqual(r["eventMetrics"], evaluate_session(s)["eventMetrics"])
+            self.assertEqual(len(r["peakOccurrenceDiagnostics"]["reference"]["referenceContentSha256"]), 64)
+
+    def test_reference_identity_boundaries_and_conflicts_checked(self):
+        s = self.fixture()
+        for ref in [{"sessionId": "wrong", "peaks": []},
+                    {"peaks": [{"id": "unknown", "peakMs": 200}]},
+                    {"peaks": [{"id": "a1", "peakMs": 400, "hand": "right"}]},
+                    {"peaks": [{"id": "a1", "peakMs": 400, "startMs": 101}]},
+                    {"peaks": [{"id": "a1", "peakMs": 401}]}]:
+            with self.assertRaises(ValueError):
+                self.diagnostic(s, peak_reference=ref)
+        s["benchmark"] = {"sourceSessionId": "original-id", "sourceVideoSha256": "a" * 64}
+        self.assertEqual(self.diagnostic(s, peak_reference={"sourceSessionId": "original-id", "peaks": []})["metrics"]["tp"], 1)
+        with self.assertRaisesRegex(ValueError, "video fingerprint"):
+            self.diagnostic(s, peak_reference={"sourceVideoSha256": "b" * 64, "peaks": []})
+
+    def test_raw_uncertain_notes_do_not_add_truth_or_change_exclusions(self):
+        s = self.fixture()
+        s["annotations"].append(event("unknown", 800, 1000, "unobservable", "unknown"))
+        s["events"].append({**event("ignored", 850, 950), "peakMs": 900})
+        reference = {"actionObservations": [{"id": "ambiguous-not-scored", "peakMs": 900, "label": "hook"}]}
+        r = evaluate_session(s, peak_reference=reference)
+        d = r["peakOccurrenceDiagnostics"]
+        self.assertEqual(d["metrics"]["tp"], 1)
+        self.assertEqual(d["metrics"]["fp"], 0)
+        self.assertEqual(d["metrics"]["evaluatedExposureMs"], 800)
+        self.assertEqual(d["reference"]["unscoredReferenceObservationIds"], ["ambiguous-not-scored"])
+
+    def test_empty_and_incomplete_reference_aggregate(self):
+        empty = session()
+        empty["annotationsComplete"] = True
+        r = build_report([empty])
+        self.assertIsNone(r["peakOccurrenceDiagnostics"]["metrics"]["precision"])
+        complete, missing = self.fixture(), self.fixture()
+        missing["id"] = "missing"
+        del missing["annotations"][0]["peakMs"]
+        r = build_report([complete, missing])
+        self.assertIsNone(r["peakOccurrenceDiagnostics"]["metrics"])
+        self.assertEqual(r["peakOccurrenceDiagnostics"]["scoredSessionCount"], 1)
+        self.assertEqual(r["peakOccurrenceDiagnostics"]["timingMs"]["sourcePeakToEmissionMs"]["count"], 1)
+        with self.assertRaisesRegex(ValueError, "input session IDs"):
+            build_report([complete], peak_references={"different": {"peaks": []}})
+
+    def test_cli_reference_and_overwrite_guard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, reference, output = [Path(directory) / name for name in ("session.json", "peaks.json", "report.json")]
+            s = self.fixture()
+            del s["annotations"][0]["peakMs"]
+            source.write_text(json.dumps(s))
+            reference.write_text(json.dumps({"peaks": [{"annotationId": "a1", "peakTMs": 400}]}))
+            self.assertEqual(main([str(source), "--peak-reference", str(reference), "--output", str(output)]), 0)
+            self.assertEqual(json.loads(output.read_text())["peakOccurrenceDiagnostics"]["metrics"]["tp"], 1)
+            original = reference.read_bytes()
+            self.assertEqual(main([str(source), "--peak-reference", str(reference), "--output", str(reference)]), 2)
+            self.assertEqual(reference.read_bytes(), original)
 
 
 if __name__ == "__main__":
