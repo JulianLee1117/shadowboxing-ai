@@ -52,7 +52,7 @@ The [six-punch dataset tools](docs/action-dataset.md) prepare physical-hand/stan
 
 The [RGB+pose inspection CLI](docs/rgb-pose-inspection.md) extracts bounded local image and native pose features from external footage, preserving all detected people and source provenance. It is separate from the live webcam service and does not train or assign boxer identities. [The acquired-data audit](docs/research/expert-reference-data.md) records the actual BoxingWeb footage and annotation findings.
 
-The [native-observation replay CLI](docs/observation-replay.md) diagnoses saved external observations without guessing stance, with exact clocks, optional cut resets, passive traces and captured-decision parity. [Additional solo footage](docs/research/solo-boxing-expansion-2026-09.md) broadens the source groups; complete action labels and separate form assessments remain pending. The [smaller-detector comparison](docs/research/yolox-s-speed-2026-09.md) records a promising timing result and its failed acceptance gate; the active detector is unchanged.
+The [native-observation replay CLI](docs/observation-replay.md) diagnoses saved external observations without guessing stance, with exact clocks, optional cut resets, passive traces and captured-decision parity. [Additional solo footage](docs/research/solo-boxing-expansion-2026-09.md) broadens the source groups with provisional action references, preserved timing uncertainty and corrected camera cuts. Complete six-punch labels and separate form assessments remain pending. The [smaller-detector comparison](docs/research/yolox-s-speed-2026-09.md) records a promising timing result and its failed acceptance gate; the active detector is unchanged.
 
 ## Verify and evaluate
 

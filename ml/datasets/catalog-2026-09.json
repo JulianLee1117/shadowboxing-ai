@@ -205,7 +205,7 @@
     },
     {
       "id": "cmu-mocap-boxing",
-      "name": "CMU Graphics Lab Motion Capture Database \u2014 selected boxing and gestures",
+      "name": "CMU Graphics Lab Motion Capture Database — selected boxing and gestures",
       "priority": "usable_auxiliary",
       "urls": {
         "home": "https://mocap.cs.cmu.edu/",
@@ -696,7 +696,7 @@
     {
       "id": "solo-boxing-expansion-2026-09-27",
       "name": "Additional sports-training solo-view candidates",
-      "priority": "acquired_shot_and_action_annotation_pending",
+      "priority": "three_source_groups_reserved_for_partial_action_evaluation_ramsay_model_unseen",
       "urls": {
         "ramsay-ortiz": "https://www.dvidshub.net/video/940612/b-roll-mig-marine-trains-boxing-match",
         "fort-jackson-2026": "https://www.dvidshub.net/video/1015971/fort-jackson-boxing-training-b-roll",
@@ -706,7 +706,7 @@
         "commonsLicense": "https://creativecommons.org/licenses/by/3.0/"
       },
       "modality": ["rgb_video"],
-      "annotationKind": "provisional_source_shot_suitability_only_no_complete_action_labels",
+      "annotationKind": "partial_provisional_assistant_video_only_action_phase_ranges_and_uncertainty",
       "qualityLabels": false,
       "access": {
         "status": "four_public_renditions_acquired_native_timestamped_and_screened",
@@ -725,7 +725,7 @@
           "Preserve source attribution, applicable license, change notices and non-endorsement",
           "Source declarations do not establish all depicted-person or third-party clearances"
         ],
-        "trainingStatus": "No training; complete action/guard annotation and grouping required first",
+        "trainingStatus": "No training; Fort Jackson, Hamadouche and Ramsay whole source groups and all aliases reserved evaluation-only. Fort/Hamadouche baseline inspected; Ramsay has no inference.",
         "redistributionStatus": "Original media stays local and ignored; none redistributed"
       },
       "observedCounts": {
@@ -733,7 +733,17 @@
         "nativeFrames": 22348,
         "usefulApparentPerformerGroups": 3,
         "completeSixPunchLabels": false,
-        "poseInferenceCalls": 0
+        "poseInferenceCalls": 701,
+        "actionReviewNativeFrames": 1742,
+        "provisionalStraightActions": 33,
+        "uncertainIntervals": 26,
+        "scalarPeakLabels": 0,
+        "completeBackgroundLabels": false,
+        "provisionalHookActions": 3,
+        "provisionalUppercutActions": 0,
+        "provisionalActionObservations": 36,
+        "observedNonPunchContextSpans": 17,
+        "detectorInferenceCalls": 708
       },
       "sourceFiles": [
         {
@@ -745,7 +755,11 @@
           "firstNativePtsSeconds": 0,
           "lastNativePtsSeconds": 96.3963,
           "provisionalSourceGroup": "ramsay-2024-10-12-escondido",
-          "screeningStatus": "candidate_solo_shots_with_edits"
+          "screeningStatus": "scoped_provisional_action_review_complete_with_explicit_uncertainty",
+          "reservedUse": "evaluation_only_no_training_model_unseen",
+          "detectorInferenceCalls": 0,
+          "poseInferenceCalls": 0,
+          "recognizerInferenceCalls": 0
         },
         {
           "id": "fort-jackson-2026",
@@ -756,8 +770,9 @@
           "firstNativePtsSeconds": 2.066733333,
           "lastNativePtsSeconds": 143.908433333,
           "provisionalSourceGroup": "fort-jackson-2026-07-22-apparent-mathews",
-          "screeningStatus": "candidate_solo_shots_with_mirrors_and_edits",
-          "containerLineage": "15 official 720p HLS TS segments concatenated byte-for-byte in playlist order; individual hashes/offsets retained; no remux or clock rewrite"
+          "screeningStatus": "scoped_provisional_action_review_complete_with_explicit_uncertainty",
+          "containerLineage": "15 official 720p HLS TS segments concatenated byte-for-byte in playlist order; individual hashes/offsets retained; no remux or clock rewrite",
+          "reservedUse": "evaluation_only_no_training"
         },
         {
           "id": "maiva-2021",
@@ -768,7 +783,8 @@
           "firstNativePtsSeconds": 0.007,
           "lastNativePtsSeconds": 218.207,
           "provisionalSourceGroup": "hamadouche-2021-portrait",
-          "screeningStatus": "candidate_solo_shots_with_edits"
+          "screeningStatus": "scoped_provisional_action_review_complete_with_explicit_uncertainty",
+          "reservedUse": "evaluation_only_no_training"
         },
         {
           "id": "usa-boxing-2012",
@@ -793,14 +809,258 @@
           "fort-jackson-2026": [858],
           "maiva-2021": [2191, 2264]
         },
-        "scope": "Exact continuity/visibility references only inside two fixed windows; no action/form labels or negative completeness"
+        "scope": "Original declared continuity/visibility references inside two fixed windows; Fort continuous360–857 claim later corrected, original hash/history retained",
+        "status": "immutable_first_report_preserved_with_later_continuity_erratum",
+        "independentAuditSha256": "6d5da2c0f4ef47d3ddda900c9f1bcae2862c446992f3a05f9d434c71c1b55b09",
+        "independentAuditLimit": "Verified original declared cuts and pinned records; not a full repeat visual review or proof that no other edit existed",
+        "laterContinuityErratum": {
+          "localEvidence": "data/pilot/external-action-audit-v1/continuity-erratum.json",
+          "sha256": "e09d57732cdd56b818e83f4d286e9f3737664155b959782793495c9427a49ad4",
+          "source": "fort-jackson-2026",
+          "lastFrameBefore": 617,
+          "firstFrameAfter": 618,
+          "nativePtsBeforeSeconds": 22.653966666666665,
+          "nativePtsAfterSeconds": 22.687333333333335,
+          "correctedTemporalContexts": [
+            [360, 617],
+            [618, 857]
+          ],
+          "originalManifestAndAuditPreserved": true,
+          "requiresTemporalReset": true,
+          "supersedes": "Only the original continuous Fort360–857 claim; fixed review scope and source group unchanged"
+        }
       },
       "blockers": [
-        "Shot boundaries are reviewed only inside two fixed windows; wider target continuity and complete action labels remain unannotated",
-        "Dense 200 ms screening cannot enumerate all fast actions or supply complete guard negatives",
-        "Right-hook and left-uppercut coverage not yet established; no stance/peak/fault labels",
-        "All views from one performer-day/event stay together; independent person split not yet frozen",
+        "Fixed native-frame subsets contain 36 provisional actions (33 straights, 3 physical-right hooks) and 26 uncertainty spans; not complete six-family labels",
+        "Limited visible non-punch contexts are not exhaustive both-arm negatives; unlabelled frames, cropped rises, feints and obscured arms remain unlabelled or uncertain",
+        "All 36 scalar peaks withheld; preserve native terminal ranges and onset/recovery uncertainty rather than inventing scoring points",
+        "Fort 617→618 and Ramsay 3538→3539 require temporal resets; original shot/source histories remain preserved",
+        "All three whole source groups and aliases are evaluation-only; Fort/Hamadouche now baseline-inspected, Ramsay model-unseen with zero inference",
+        "USA Boxing excluded from clean solo subset; no proper-form/fault or stance-role labels, or verified population-independent claims",
         "Published-media cadence does not prove capture speed or absence of retiming"
+      ],
+      "evaluationReservation": {
+        "canonicalSourceGroups": [
+          "fort-jackson-2026-07-22-apparent-mathews",
+          "hamadouche-2021-portrait",
+          "ramsay-2024-10-12-escondido"
+        ],
+        "role": "evaluation_only_untouched_by_model_at_reference_freeze",
+        "trainingAllowed": false,
+        "allShotsEncodingsAndAliasesStayTogether": true,
+        "groupRegistry": "data/pilot/external-shot-audit-v1/group-aliases.json",
+        "groupRegistrySha256": "5819c67a222f98f5bee122e2e8c35d75f42ab742869678f5a68771dd2526121f",
+        "preLabelAmendment": "data/pilot/external-action-audit-v1/group-amendment.json",
+        "preLabelAmendmentSha256": "a796a69199de48cb07a2e794b29389930f98f263f192df34f9ea2d4fe78fdc03",
+        "populationIndependenceVerified": false,
+        "currentStatusByGroup": {
+          "fort-jackson-2026-07-22-apparent-mathews": "evaluation_only_baseline_inspected",
+          "hamadouche-2021-portrait": "evaluation_only_baseline_inspected",
+          "ramsay-2024-10-12-escondido": "evaluation_only_model_unseen_no_inference"
+        },
+        "additionalGroupReservation": {
+          "canonicalSourceGroup": "ramsay-2024-10-12-escondido",
+          "aliases": [
+            "dvids-escondido-2024-10-12-ramsay",
+            "DVIDS940611",
+            "DVIDS940612"
+          ],
+          "localProtocol": "data/pilot/ramsay-action-audit-v1/protocol.json",
+          "protocolSha256": "25245981279f800c9925bf9bff59b3837212152ee9dd0fb9bc573ef04c811fb1",
+          "existingRegistryEvidence": "data/external/solo-boxing-expansion-2026-09-27/erratum.json",
+          "existingRegistrySha256": "60818be96c3c2f5c5703c7ee9ce40d1356c080af6ea7075b3e6fbf829105d375",
+          "originalRegistryUnchanged": true
+        }
+      },
+      "actionAudit": {
+        "localEvidence": "data/pilot/external-action-audit-v1/references.json",
+        "sha256": "0dd0a6ba1fa288409b66e1a991d9dd21069c9d7655ab5caf13c4695bb68e1f26",
+        "completionSha256": "f81660c1f218950a9228e79450353453a3bc01ed15820edb848c21187a0783ee",
+        "reviewedNativeFrames": 708,
+        "reviewMethod": "Every source frame in fixed scope; native detail images for hand, family and edit verification; no predictions or pose estimates read",
+        "countsBySource": {
+          "fort-jackson-2026": {
+            "straight": 11,
+            "left": 9,
+            "right": 2,
+            "uncertainIntervals": 4
+          },
+          "maiva-2021": {
+            "straight": 3,
+            "left": 2,
+            "right": 1,
+            "uncertainIntervals": 1
+          }
+        },
+        "phaseTiming": "Original native-frame onset, terminal and recovery ranges; all14 scalar peaks null; no midpoint conversion",
+        "framePartition": {
+          "action": 166,
+          "uncertain": 57,
+          "observedNonPunchContext": 485
+        },
+        "observedNonPunchContextSpans": 14,
+        "completeBackgroundLabels": false,
+        "completeSixFamilyLabels": false,
+        "physicalHandLabels": "Provisional anatomical left/right from displayed source continuity; undisclosed editorial mirroring unverified",
+        "stanceRoleLabels": false,
+        "formGrades": false,
+        "originalPublisherLabels": false,
+        "independentAudit": {
+          "localEvidence": "data/pilot/external-action-audit-v1/independent-reference-audit.json",
+          "sha256": "e47c352e516ffd268a1080b4e54ca5d1eb98a9ea33b02d7037fe6a54c37ab2bf",
+          "pinnedFilesVerified": 68,
+          "nativeRecordsVerified": 708,
+          "rangePairsVerified": 75,
+          "scope": "Structural/hash verification and limited Fort-right/Maiva-LRL source-pixel spots; not full independent relabeling or coach validation"
+        }
+      },
+      "currentBaseline": {
+        "status": "completed_unchanged_active_model_one_pass",
+        "localEvidence": "data/pilot/external-sports-baseline-v1/summary.json",
+        "summarySha256": "82b8fcecf63c775881fdeaf1d28071d43cd653fdb654f3920ab441c7eea71edf",
+        "protocolSha256": "30fd4a09e29b0c013bb21e304789e95edaff05ece45eb81845c6419074933f56",
+        "inputLockSha256": "5794e394451bf0977b3088caea693fdb166d679378d8cdfc878c2da6783e3d92",
+        "postInferenceReferenceJoinSha256": "9de6d4b5a84bf73abc362c99a09ec6bc83e38f336d8976e65238aa54414a6dc7",
+        "model": "YOLOX-M plus RTMPose-M current static-detector/default-pose CoreML partition, configured/effective detector .7 and native score .55, unchanged seven-recording personal v5 recognizer",
+        "recognizerManifestSha256": "a821d37e52129c311d7aa78256522e0c6c10a6670f52a6692b61605eb25efd61",
+        "sourceObservationCount": 708,
+        "detectorCalls": 708,
+        "actualPoseCalls": 701,
+        "recognizerUpdates": 708,
+        "extraWarmupOrEofObservations": 0,
+        "exactReviewedBgrPixelHashesVerified": 708,
+        "sourceNativeClocksPreserved": true,
+        "resetBeforeNativeFrameIndices": {
+          "fort-jackson-2026": [618],
+          "maiva-2021": [2264]
+        },
+        "wholeSourceGroupStatus": "evaluation_only_now_inspected_no_training",
+        "countsBySource": {
+          "fort-jackson-2026": {
+            "observations": 498,
+            "singlePerson": 491,
+            "multiplePersonAbstentions": 7,
+            "rawPhysicalEvents": {
+              "leftStraight": 4,
+              "rightStraight": 2
+            },
+            "provisionalTerminalCompatibleReferences": 4,
+            "provisionalReferenceCount": 11,
+            "preExistingUnknownExclusions": 2
+          },
+          "maiva-2021": {
+            "observations": 210,
+            "singlePerson": 210,
+            "multiplePersonAbstentions": 0,
+            "rawPhysicalEvents": {
+              "leftStraight": 2,
+              "rightStraight": 2
+            },
+            "provisionalTerminalCompatibleReferences": 3,
+            "provisionalReferenceCount": 3,
+            "preExistingUnknownExclusions": 1
+          }
+        },
+        "diagnosticScope": "Seven of14 provisional actions have compatible terminal evidence; not accuracy. All14 scalar peaks remain null. Three predicted events intersect pre-existing uncertain gestures; no FP claim. Partial action/background coverage remains incomplete.",
+        "referencesEnteredInference": false,
+        "training": false,
+        "activationChanged": false,
+        "timingClaim": false,
+        "timingLimit": "Concurrent root work, profiling and offline lossless full-resolution input; not browser JPEG or webcam throughput."
+      },
+      "ramsayActionAudit": {
+        "localEvidence": "data/pilot/ramsay-action-audit-v1/references.json",
+        "sha256": "e545c6e5e85233c7bf48d52f8e39c44e887deaaca536254872344119f0f45dc2",
+        "protocolSha256": "25245981279f800c9925bf9bff59b3837212152ee9dd0fb9bc573ef04c811fb1",
+        "completionSha256": "c1f443e20c61b7de853690d19b25330b8f75c10bbf4199950fb232842d763c44",
+        "reviewedNativeFrames": 1034,
+        "fixedScopes": [
+          [3288, 3720],
+          [5088, 5688]
+        ],
+        "provisionalActionObservations": 22,
+        "counts": {
+          "straight": 19,
+          "hook": 3,
+          "uppercut": 0,
+          "leftStraight": 14,
+          "rightStraight": 5,
+          "rightHook": 3,
+          "uncertaintySpans": 21,
+          "limitedObservedNonPunchSpans": 3
+        },
+        "scalarPeakLabels": 0,
+        "phaseTiming": "Original native onset/terminal/recovery ranges; all scalar peaks null; no midpoint conversion",
+        "coverage": {
+          "reviewedFrames": 1034,
+          "framesWithAnyReferenceCategory": 961,
+          "reviewedButUnlabelledFrames": 73,
+          "framesWithMultipleReferenceCategories": 36,
+          "categoryMembershipCountsNotUniqueFrames": {
+            "action": 540,
+            "uncertain": 389,
+            "limitedObservedNonPunch": 68
+          },
+          "interpretation": "The reference is intentionally partial. Opposite-arm action/uncertainty can overlap; no same-hand positive/unknown collision found. Neither unlabelled time nor a hidden opposite arm becomes negative truth."
+        },
+        "completeBackgroundLabels": false,
+        "completeSixFamilyLabels": false,
+        "formGrades": false,
+        "stanceRoleLabels": false,
+        "reviewMethod": "Every selected source frame reviewed; no prediction or pose outputs read. Provisional assistant-reviewed families, not publisher labels or expert/form validation.",
+        "cut": {
+          "lastFrameBefore": 3538,
+          "firstFrameAfter": 3539,
+          "nativePtsBeforeSeconds": 59.02563333333333,
+          "nativePtsAfterSeconds": 59.042316666666665,
+          "requiresTemporalReset": true,
+          "crossingActionCensored": true,
+          "priorRecordsUnchanged": true
+        },
+        "temporalContexts": [
+          [3288, 3538],
+          [3539, 3720],
+          [5088, 5688]
+        ],
+        "modelCalls": 0,
+        "trainingAllowed": false,
+        "currentModelStatus": "untouched_by_model_evaluation_only",
+        "independentAudit": {
+          "localEvidence": "data/pilot/ramsay-action-audit-v1/independent-reference-audit.json",
+          "sha256": "dbf23e09dc621dc4391a58dd6bea61d4efedb7538c2133a11c831131fd6c610c",
+          "pinnedFilesVerified": 65,
+          "nativeRecordsVerified": 1034,
+          "rangePairsVerified": 112,
+          "detailPngPixelHashesVerified": 13,
+          "scope": "Structural/hash checks and bounded three-hook/cut source-pixel spots; not full independent relabeling or coach validation",
+          "materialCorrectionsRequested": []
+        }
+      },
+      "referenceCollections": [
+        {
+          "id": "external-action-audit-v1",
+          "reviewedNativeFrames": 708,
+          "provisionalActions": 14,
+          "straight": 14,
+          "hook": 0,
+          "uncertaintySpans": 5,
+          "observedNonPunchContextSpans": 14,
+          "modelStatus": "baseline_completed_evaluation_only",
+          "detectorCalls": 708,
+          "poseCalls": 701
+        },
+        {
+          "id": "ramsay-action-audit-v1",
+          "reviewedNativeFrames": 1034,
+          "provisionalActions": 22,
+          "straight": 19,
+          "hook": 3,
+          "uncertaintySpans": 21,
+          "observedNonPunchContextSpans": 3,
+          "modelStatus": "model_unseen_evaluation_only",
+          "detectorCalls": 0,
+          "poseCalls": 0
+        }
       ]
     }
   ]

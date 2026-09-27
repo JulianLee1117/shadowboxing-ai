@@ -12,6 +12,8 @@ The separate `peakOccurrenceDiagnostics` field asks whether an event identifies 
 
 Predicted peaks describe what the recognizer selected; reference peaks must come from independent video annotation. A ±250 ms match can be ambiguous during rapid combinations. Both metrics, unmatched event IDs, timing distributions and the original footage remain necessary for interpretation. Do not tune this tolerance on the recordings being compared.
 
+When video review supports several plausible terminal frames, keep those ranges and leave scalar peaks unknown. The separate [terminal-range compatibility tool](terminal-range-evaluation.md) reports deterministic associations and ambiguity without changing either score or inventing a peak. Its conservative unknown-mask policy differs from this evaluator; totals must not be compared across them.
+
 ## Running the evaluator
 
 ```bash
@@ -39,9 +41,7 @@ Without an external reference, explicit peaks already present on `session.annota
 ```json
 {
   "sessionId": "the-original-session-id",
-  "peaks": [
-    {"annotationId": "punch-01", "peakTMs": 1234}
-  ]
+  "peaks": [{ "annotationId": "punch-01", "peakTMs": 1234 }]
 }
 ```
 
@@ -53,11 +53,11 @@ Raw `actionObservations` may include ambiguous video notes that were deliberatel
 
 Every occurrence match reports signed source-peak error, absolute peak error, start/end boundary error, tIoU and whether the same pair also passed strict matching. With recorded `detectedAtMs`, it additionally reports:
 
-| Field | Definition |
-|---|---|
-| `sourcePeakToEmissionMs` | Recorded emission source time minus independent reference peak |
-| `predictedPeakToEmissionMs` | Recorded emission source time minus predicted peak |
-| `referenceEndToEmissionMs` | Recorded emission source time minus reference end; may be negative |
+| Field                       | Definition                                                         |
+| --------------------------- | ------------------------------------------------------------------ |
+| `sourcePeakToEmissionMs`    | Recorded emission source time minus independent reference peak     |
+| `predictedPeakToEmissionMs` | Recorded emission source time minus predicted peak                 |
+| `referenceEndToEmissionMs`  | Recorded emission source time minus reference end; may be negative |
 
 Each distribution includes sample count, median, p95 and maximum. Missing emission telemetry contributes no latency sample. Emission before a prediction's own end is rejected when that prediction is eligible for peak diagnostics. No latency is inferred from a video frame's position in an array.
 
