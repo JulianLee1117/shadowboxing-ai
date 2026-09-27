@@ -4,13 +4,20 @@ import type {
   PoseDelegate,
   PoseFrame,
 } from "./types";
-import { LocalPoseClient } from "./localPoseClient";
+import {
+  LocalPoseClient,
+  type PreparedLocalPoseFrame,
+} from "./localPoseClient";
 import type {
   PoseWorkerRequest,
   PoseWorkerReply,
 } from "../workers/pose.worker";
 
 type Delegate = "GPU" | "CPU";
+export type PreparedVisionFrame = (
+  | { kind: "local"; image: PreparedLocalPoseFrame }
+  | { kind: "bitmap"; image: ImageBitmap }
+) & { t: number; close(): void };
 interface PendingRequest {
   resolve: (message: PoseWorkerReply) => void;
   reject: (error: Error) => void;
@@ -147,6 +154,48 @@ export class VisionRunner {
       throw new Error("Video has no decoded frame available yet.");
     }
     return this.detectImage(video, t);
+  }
+
+  /** Capture at the source callback. Local JPEG encoding can overlap inference. */
+  async prepareImage(
+    source: ImageBitmapSource,
+    t: number,
+  ): Promise<PreparedVisionFrame> {
+    if (this.disposed || !this.initialized)
+      throw new Error("Initialize the pose runner before preparing frames.");
+    if (!Number.isFinite(t) || t < 0)
+      throw new Error(
+        "Frame timestamp must be finite, source-relative milliseconds.",
+      );
+    if (this.local) {
+      const image = await this.local.prepareImage(source, t);
+      if (this.disposed) {
+        image.close();
+        throw new Error("Pose runner stopped while preparing the frame.");
+      }
+      return { kind: "local", image, t, close: () => image.close() };
+    }
+    const image = await createImageBitmap(source);
+    if (this.disposed || !image.width || !image.height) {
+      image.close();
+      throw new Error("Pose runner stopped or captured empty pixels.");
+    }
+    return { kind: "bitmap", image, t, close: () => image.close() };
+  }
+
+  async detectPrepared(
+    frame: PreparedVisionFrame,
+    t: number,
+  ): Promise<PoseFrame> {
+    if (this.disposed || !this.initialized)
+      throw new Error("Initialize the pose runner before detecting frames.");
+    if (frame.t !== t)
+      throw new Error("Prepared frame source timestamp changed.");
+    if (frame.kind === "local" && this.local)
+      return this.local.detectPrepared(frame.image, t);
+    if (frame.kind === "bitmap" && !this.local)
+      return this.detectImage(frame.image, t);
+    throw new Error("Prepared frame belongs to a different pose pipeline.");
   }
 
   /** Decoded offline pixels use the same worker and ownership rules as live video. */

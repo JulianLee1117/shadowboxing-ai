@@ -1232,6 +1232,11 @@ test("every consecutive 20 Hz pose result reaches the visible skeleton", async (
       body: `export class VisionRunner {
       delegate='CPU'; modelInfo=null;
       async init(){}
+      async prepareImage(_image,t){return {t,close(){}};}
+      async detectPrepared(image,t){
+        if(image.t!==t)throw Error('Source timestamp changed');
+        return this.detectImage(null,t);
+      }
       async detectImage(_image,t){
         const index=window.__poseResults.length;
         const frame=structuredClone(window.__poseFixture);

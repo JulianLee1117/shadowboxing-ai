@@ -8,7 +8,7 @@ import type {
   SourceKind,
   Stance,
 } from "../lib/types";
-import { VisionRunner } from "../lib/vision";
+import { VisionRunner, type PreparedVisionFrame } from "../lib/vision";
 import { LocalPoseBusyError } from "../lib/localPoseClient";
 import { LatestFramePump } from "../lib/latestFramePump";
 import {
@@ -117,7 +117,7 @@ export function useStudio(onComplete: (session: Session) => void) {
   const generation = useRef(0);
   const raf = useRef(0);
   const videoCallback = useRef<number | null>(null);
-  const framePump = useRef<LatestFramePump | null>(null);
+  const framePump = useRef<LatestFramePump<PreparedVisionFrame> | null>(null);
   const lastMedia = useRef(-1);
   const lastSource = useRef(0);
   const sourceStart = useRef(0);
@@ -358,10 +358,15 @@ export function useStudio(onComplete: (session: Session) => void) {
     (gen: number) => {
       const vision = runner.current;
       framePump.current?.dispose();
-      const pump = new LatestFramePump({
+      const pump = new LatestFramePump<PreparedVisionFrame>({
+        snapshot: (source, mediaMs) => {
+          if (!vision)
+            return Promise.reject(new Error("Pose runner is unavailable."));
+          return vision.prepareImage(source, mediaMs);
+        },
         process: async (bitmap, mediaMs, observedAt) => {
           if (gen !== generation.current || !vision) return;
-          const result = await vision.detectImage(bitmap, mediaMs);
+          const result = await vision.detectPrepared(bitmap, mediaMs);
           if (gen !== generation.current) return;
           receive({ ...result, frameAgeMs: performance.now() - observedAt });
         },

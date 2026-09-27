@@ -1,17 +1,23 @@
-export interface LatestFramePumpOptions {
-  /** Borrows the snapshot until this promise settles. Do not close or transfer it. */
-  process: (
-    bitmap: ImageBitmap,
-    t: number,
-    observedAt: number,
-  ) => Promise<unknown>;
-  onSkipped?: () => void;
-  onError?: (error: Error) => void;
-  snapshot?: (source: ImageBitmapSource) => Promise<ImageBitmap>;
+export interface CloseableFrame {
+  close(): void;
 }
 
-interface CapturedFrame {
-  bitmap: ImageBitmap;
+export interface LatestFramePumpOptions<
+  T extends CloseableFrame = ImageBitmap,
+> {
+  /** Borrows the snapshot until this promise settles. Do not close or transfer it. */
+  process: (bitmap: T, t: number, observedAt: number) => Promise<unknown>;
+  onSkipped?: () => void;
+  onError?: (error: Error) => void;
+  snapshot: (
+    source: ImageBitmapSource,
+    t: number,
+    observedAt: number,
+  ) => Promise<T>;
+}
+
+interface CapturedFrame<T extends CloseableFrame> {
+  bitmap: T;
   t: number;
   observedAt: number;
 }
@@ -21,20 +27,20 @@ interface CapturedFrame {
  * captured frame waits; replacement closes it before another capture starts.
  * Call push at the source callback so snapshot pixels retain that callback's
  * timestamp. Callbacks during snapshot creation are skipped, never captured
- * later under their old time. The pump owns every returned ImageBitmap.
+ * later under their old time. The pump owns every returned prepared frame.
  */
-export class LatestFramePump {
+export class LatestFramePump<T extends CloseableFrame = ImageBitmap> {
   private capturing = false;
   private processing = false;
-  private pending: CapturedFrame | null = null;
+  private pending: CapturedFrame<T> | null = null;
   private disposed = false;
   private captureEpoch = 0;
   private lastTimestamp = -Infinity;
   private idleWaiters = new Set<() => void>();
-  private readonly snapshot: NonNullable<LatestFramePumpOptions["snapshot"]>;
+  private readonly snapshot: LatestFramePumpOptions<T>["snapshot"];
 
-  constructor(private readonly options: LatestFramePumpOptions) {
-    this.snapshot = options.snapshot ?? ((source) => createImageBitmap(source));
+  constructor(private readonly options: LatestFramePumpOptions<T>) {
+    this.snapshot = options.snapshot;
   }
 
   /** Returns whether capture started. The source itself is never queued. */
@@ -86,7 +92,7 @@ export class LatestFramePump {
     this.resolveIdle();
   }
 
-  /** Terminal stop. Current inference borrows its bitmap until it settles. */
+  /** Terminal stop. Current inference borrows its frame until it settles. */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -106,10 +112,10 @@ export class LatestFramePump {
     observedAt: number,
     epoch: number,
   ): Promise<void> {
-    let bitmap: ImageBitmap;
+    let bitmap: T;
     try {
       // Invoke snapshot immediately, before the first await, while source/t match.
-      bitmap = await this.snapshot(source);
+      bitmap = await this.snapshot(source, t, observedAt);
     } catch (error) {
       this.capturing = false;
       if (!this.disposed && epoch === this.captureEpoch)
@@ -129,7 +135,7 @@ export class LatestFramePump {
     this.resolveIdle();
   }
 
-  private async process(frame: CapturedFrame): Promise<void> {
+  private async process(frame: CapturedFrame<T>): Promise<void> {
     this.processing = true;
     try {
       await this.options.process(frame.bitmap, frame.t, frame.observedAt);
@@ -150,7 +156,7 @@ export class LatestFramePump {
     }
   }
 
-  private close(bitmap: ImageBitmap): void {
+  private close(bitmap: T): void {
     try {
       bitmap.close();
     } catch (error) {

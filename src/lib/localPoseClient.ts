@@ -183,6 +183,22 @@ function readModelInfo(value: unknown): LocalPoseModelInfo {
   return value as unknown as LocalPoseModelInfo;
 }
 
+/** Owned immutable pixels; close releases an unsent frame. Single use, same client. */
+export interface PreparedLocalPoseFrame {
+  close(): void;
+}
+
+interface PreparedImage {
+  jpeg: Blob;
+  width: number;
+  height: number;
+  t: number;
+  started: number;
+  captured: number;
+  encoded: number;
+  credentials: SessionCredentials;
+}
+
 /** Optional same-origin bridge to an explicitly started loopback service.
  * This client never starts a server, downloads weights, or contacts a cloud API.
  */
@@ -196,6 +212,8 @@ export class LocalPoseClient {
   private controller: AbortController | null = null;
   private disposed = false;
   private detecting = false;
+  private encoding = false;
+  private prepared = new Map<PreparedLocalPoseFrame, PreparedImage>();
   private lastTimestamp = -1;
   private encoder: FrameEncoder | null = null;
 
@@ -290,18 +308,32 @@ export class LocalPoseClient {
     return this.detectImage(video, t);
   }
 
+  /** Serial convenience path for warmup and offline analysis. */
   async detectImage(source: ImageBitmapSource, t: number): Promise<PoseFrame> {
+    this.assertDetectionReady(t);
+    const prepared = await this.prepareImage(source, t);
+    try {
+      return await this.detectPrepared(prepared, t);
+    } finally {
+      prepared.close();
+    }
+  }
+
+  /** Capture immediately at the source callback, then encode off the UI thread.
+   * One encoding may overlap one HTTP request. The caller owns the result and
+   * must send or close it before preparing another waiting frame.
+   */
+  async prepareImage(
+    source: ImageBitmapSource,
+    t: number,
+  ): Promise<PreparedLocalPoseFrame> {
     if (this.disposed) throw new Error("Local pose client is disposed.");
     const credentials = this.credentials;
-    const info = this.info;
-    if (!credentials || !info)
-      throw new Error("Initialize local pose before detecting frames.");
-    if (this.detecting) throw new LocalPoseBusyError();
-    if (!Number.isFinite(t) || t < 0 || t <= this.lastTimestamp)
-      throw new Error(
-        "Frame times must increase. Open a new local pose session after seeking.",
-      );
-    this.detecting = true;
+    if (!credentials || !this.info)
+      throw new Error("Initialize local pose before preparing frames.");
+    this.validateTimestamp(t);
+    if (this.encoding || this.prepared.size) throw new LocalPoseBusyError();
+    this.encoding = true;
     const started = performance.now();
     let bitmap: ImageBitmap | undefined;
     try {
@@ -350,6 +382,50 @@ export class LocalPoseClient {
       if (this.disposed)
         throw new Error("Local pose stopped while encoding the frame.");
       const encoded = performance.now();
+      if (this.credentials !== credentials)
+        throw new Error("Local pose session changed while encoding.");
+      const prepared: PreparedLocalPoseFrame = Object.freeze({
+        close: () => {
+          this.prepared.delete(prepared);
+        },
+      });
+      this.prepared.set(prepared, {
+        jpeg,
+        width,
+        height,
+        t,
+        started,
+        captured,
+        encoded,
+        credentials,
+      });
+      return prepared;
+    } finally {
+      bitmap?.close();
+      this.encoding = false;
+    }
+  }
+
+  /** Consume one prepared image without capturing again or changing its clock. */
+  async detectPrepared(
+    prepared: PreparedLocalPoseFrame,
+    t: number,
+  ): Promise<PoseFrame> {
+    this.assertDetectionReady(t);
+    const image = this.prepared.get(prepared);
+    if (!image || image.credentials !== this.credentials)
+      throw new Error(
+        "Prepared frame is closed, consumed, or belongs to another session.",
+      );
+    if (image.t !== t)
+      throw new Error("Prepared frame source timestamp changed.");
+    this.prepared.delete(prepared);
+    this.detecting = true;
+    const { jpeg, width, height, started, captured, encoded, credentials } =
+      image;
+    const info = this.info!;
+    const requested = performance.now();
+    try {
       const response = await this.request(
         `/v1/sessions/${credentials.sessionId}/frame`,
         {
@@ -404,6 +480,8 @@ export class LocalPoseClient {
       }
       validateRecognition(frame.recognition, info.recognizer, t);
       this.lastTimestamp = t;
+      const completed = performance.now();
+      const queueMs = requested - encoded;
       return {
         ...frame,
         nativeKeypoints: response.nativeKeypoints,
@@ -413,15 +491,32 @@ export class LocalPoseClient {
           ...(isRecord(response.timing) ? response.timing : {}),
           captureMs: captured - started,
           encodeMs: encoded - captured,
-          requestMs: performance.now() - encoded,
-          totalMs: performance.now() - started,
+          queueMs,
+          requestMs: completed - requested,
+          // Preserve active-work timing; source-to-result age is measured by the pump.
+          totalMs: completed - started - queueMs,
+          preparedAgeMs: completed - started,
           encodedBytes: jpeg.size,
         },
       } as unknown as PoseFrame;
     } finally {
-      bitmap?.close();
       this.detecting = false;
     }
+  }
+
+  private validateTimestamp(t: number): void {
+    if (!Number.isFinite(t) || t < 0 || t <= this.lastTimestamp)
+      throw new Error(
+        "Frame times must increase. Open a new local pose session after seeking.",
+      );
+  }
+
+  private assertDetectionReady(t: number): void {
+    if (this.disposed) throw new Error("Local pose client is disposed.");
+    if (!this.credentials || !this.info)
+      throw new Error("Initialize local pose before detecting frames.");
+    if (this.detecting) throw new LocalPoseBusyError();
+    this.validateTimestamp(t);
   }
 
   private async request(path: string, init: RequestInit): Promise<unknown> {
@@ -496,6 +591,7 @@ export class LocalPoseClient {
     this.disposed = true;
     this.controller?.abort();
     this.encoder?.dispose();
+    this.prepared.clear();
     if (this.credentials) this.closeSession(this.credentials);
     this.credentials = null;
     this.info = null;
