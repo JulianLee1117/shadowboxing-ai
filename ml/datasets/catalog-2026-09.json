@@ -2,7 +2,7 @@
   "schemaVersion": "1.0",
   "auditDate": "2026-09-27",
   "scope": "Six-punch recognition, physical hand, continuous background and observable technique assessment",
-  "notice": "Research catalog, not a license grant. CoachMe JSON, the official BoxingWeb archive, four DVIDS demonstrations and two auxiliary Commons clips acquired for local inspection; only one BoxingWeb video and all 50 JSONs extracted. DVIDS source items explicitly declare public domain with use-notice limitations; BoxingWeb media rights and other source-specific blockers remain unresolved. No agreements accepted, pose pickles executed, external-media training or model activation.",
+  "notice": "Research catalog, not a license grant. CoachMe JSON, the official BoxingWeb archive, four TECOM demonstrations, two auxiliary Commons clips and four additional sports-training videos acquired for local inspection; only one BoxingWeb video and all 50 JSONs extracted. Individual DVIDS items declare public domain with use-notice limitations; the additional Commons portrait declares CC BY 3.0. BoxingWeb rights and source-specific blockers remain explicit. No agreements accepted, pose pickles executed, external-media training or model activation.",
   "datasets": [
     {
       "id": "boxingvi",
@@ -691,6 +691,116 @@
         "Titlecards and limited setup give short causal valid-person context",
         "Approximate independently assistant-reviewed phase ranges; no scalar gold peaks or human expert assessment",
         "Public-player frame cadence does not establish sensor exposure or absence of editing/retiming"
+      ]
+    },
+    {
+      "id": "solo-boxing-expansion-2026-09-27",
+      "name": "Additional sports-training solo-view candidates",
+      "priority": "acquired_shot_and_action_annotation_pending",
+      "urls": {
+        "ramsay-ortiz": "https://www.dvidshub.net/video/940612/b-roll-mig-marine-trains-boxing-match",
+        "fort-jackson-2026": "https://www.dvidshub.net/video/1015971/fort-jackson-boxing-training-b-roll",
+        "maiva-2021": "https://commons.wikimedia.org/wiki/File:(_Objectif_Tokyo_2020_)_Portrait_Ma%C3%AFva_Hamadouche.webm",
+        "usa-boxing-2012": "https://www.dvidshub.net/video/149230/usa-boxing-practice-with-army-olympic-coaches-b-roll",
+        "dvidsNotice": "https://www.dvidshub.net/about/copyright",
+        "commonsLicense": "https://creativecommons.org/licenses/by/3.0/"
+      },
+      "modality": ["rgb_video"],
+      "annotationKind": "provisional_source_shot_suitability_only_no_complete_action_labels",
+      "qualityLabels": false,
+      "access": {
+        "status": "four_public_renditions_acquired_native_timestamped_and_screened",
+        "mediaDownloaded": true,
+        "mediaBytes": 228926191,
+        "maximumMediaBytes": 300000000,
+        "maximumSourceClips": 6,
+        "agreementAccepted": false,
+        "cameraOriginalsVerified": false
+      },
+      "licenseAudit": {
+        "dvidsMedia": "Three individual source pages explicitly declare PUBLIC DOMAIN; linked use notice retained",
+        "commonsMedia": "CC-BY-3.0 Unported; original YouTube license review recorded by Commons on 2021-08-21",
+        "commonsAttribution": "Saint-Quentin-en-Yvelines – Communauté d’agglomération",
+        "limitations": [
+          "Preserve source attribution, applicable license, change notices and non-endorsement",
+          "Source declarations do not establish all depicted-person or third-party clearances"
+        ],
+        "trainingStatus": "No training; complete action/guard annotation and grouping required first",
+        "redistributionStatus": "Original media stays local and ignored; none redistributed"
+      },
+      "observedCounts": {
+        "clips": 4,
+        "nativeFrames": 22348,
+        "usefulApparentPerformerGroups": 3,
+        "completeSixPunchLabels": false,
+        "poseInferenceCalls": 0
+      },
+      "sourceFiles": [
+        {
+          "id": "ramsay-ortiz",
+          "bytes": 117252839,
+          "sha256": "7dc8afdb31f5f78d3b0d5776cf22973dd297b7a1adffc12c92e50982dcc4deb6",
+          "nativeFrames": 5779,
+          "nativeTimeBase": "1/60000",
+          "firstNativePtsSeconds": 0,
+          "lastNativePtsSeconds": 96.3963,
+          "provisionalSourceGroup": "ramsay-2024-10-12-escondido",
+          "screeningStatus": "candidate_solo_shots_with_edits"
+        },
+        {
+          "id": "fort-jackson-2026",
+          "bytes": 36772988,
+          "sha256": "521ad887297662b521386eb753d2623949b707b9752af5e681fffb9b20ee1af0",
+          "nativeFrames": 4252,
+          "nativeTimeBase": "1/90000",
+          "firstNativePtsSeconds": 2.066733333,
+          "lastNativePtsSeconds": 143.908433333,
+          "provisionalSourceGroup": "fort-jackson-2026-07-22-apparent-mathews",
+          "screeningStatus": "candidate_solo_shots_with_mirrors_and_edits",
+          "containerLineage": "15 official 720p HLS TS segments concatenated byte-for-byte in playlist order; individual hashes/offsets retained; no remux or clock rewrite"
+        },
+        {
+          "id": "maiva-2021",
+          "bytes": 50571962,
+          "sha256": "58cdd9948968dd4bed4b2ef6c5812c921f6dc3554ac28925d0ff7e6b51ba1fc4",
+          "nativeFrames": 5456,
+          "nativeTimeBase": "1/1000",
+          "firstNativePtsSeconds": 0.007,
+          "lastNativePtsSeconds": 218.207,
+          "provisionalSourceGroup": "hamadouche-2021-portrait",
+          "screeningStatus": "candidate_solo_shots_with_edits"
+        },
+        {
+          "id": "usa-boxing-2012",
+          "bytes": 24328402,
+          "sha256": "c7aae7201e8d5619b9e2034886c5b2c036bb057fd48aac791765b1da55525f45",
+          "nativeFrames": 6861,
+          "nativeTimeBase": "1/2997",
+          "firstNativePtsSeconds": 0,
+          "lastNativePtsSeconds": 228.895562229,
+          "provisionalSourceGroup": "usa-boxing-2012-07-13-unassigned-athletes",
+          "screeningStatus": "excluded_from_clean_solo_set"
+        }
+      ],
+      "localAudit": "data/external/solo-boxing-expansion-2026-09-27/README.md",
+      "completionSha256": "2dd38b6610eda918ff9ce91ad56f2f86a0be5bc2d87790bc46130eb579fcf391",
+      "shotAudit": {
+        "localEvidence": "data/pilot/external-shot-audit-v1/shot-manifest.json",
+        "sha256": "e72e68b0ddd777a281cebb450211d666e83a1ed72f368bebab1d6c9a1a020176",
+        "reviewedNativeFrames": 762,
+        "sources": ["fort-jackson-2026", "maiva-2021"],
+        "exactCutFirstFrames": {
+          "fort-jackson-2026": [858],
+          "maiva-2021": [2191, 2264]
+        },
+        "scope": "Exact continuity/visibility references only inside two fixed windows; no action/form labels or negative completeness"
+      },
+      "blockers": [
+        "Shot boundaries are reviewed only inside two fixed windows; wider target continuity and complete action labels remain unannotated",
+        "Dense 200 ms screening cannot enumerate all fast actions or supply complete guard negatives",
+        "Right-hook and left-uppercut coverage not yet established; no stance/peak/fault labels",
+        "All views from one performer-day/event stay together; independent person split not yet frozen",
+        "Published-media cadence does not prove capture speed or absence of retiming"
       ]
     }
   ]

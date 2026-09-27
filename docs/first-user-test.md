@@ -1,4 +1,4 @@
-# Next test: the punch log and your coaching labels
+# Next test: live delivery, punch history and original replay
 
 ## 1. Check feedback from boxing distance
 
@@ -13,6 +13,8 @@ Check these three things:
 - Can you read the latest names from your stance without moving toward the laptop?
 - Do consecutive punches get distinct rows quickly enough to follow?
 - Do physical L/R match your hands, and which movements were missed or counted incorrectly?
+
+In the saved round's **Export & details**, note **Video delivery rate** and **Pose rate**. The first measures delivered video callbacks; the second measures processed tracking observations. Older rounds or unsupported browsers may have no delivery measurement. Keep this separate from recognition: smoother tracking does not prove that more punches were correctly identified. The evidence export preserves frame-age timing for diagnosis. One ordinary 20–30 second mixed round at your usual practice pace, with a short guard-only finish, is enough for this check.
 
 ## 2. Optionally correct a few existing clips
 

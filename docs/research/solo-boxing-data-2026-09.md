@@ -54,6 +54,8 @@ Private `data/pilot/dvids-recognizer-trace-v1/` retains the protocol, 14 pinned 
 
 ## Remaining gap
 
+The next bounded acquisition is now complete: [four additional sports-training videos](solo-boxing-expansion-2026-09.md), with three useful apparent performer/source groups and complete native clocks. This broadens the candidate footage; it has not yet supplied complete six-punch labels, precise shot boundaries or form judgments. No inference or training used those additions.
+
 The saved geometry and trace now distinguish viewpoint-dependent rejection from wrong-family/background classification. Select the next hypothesis from those findings, with separate controls for representation and decoder changes. Do not fit or tune to these four now-familiar examples. Four actions cannot support training promotion, a meaningful accuracy estimate or a new form grade.
 
 The collection still lacks right hooks, left uppercuts, natural combinations, varied people/days, broad non-punch behavior and criterion-specific faults/acceptable variations. Cropping, mirroring or repeated playback does not add independent people or authentic missing-hand examples. A usable training collection still needs continuous, explicitly reusable solo footage plus reviewed physical-hand/family labels. Skilled form references require separate criterion judgments; neither the user's imperfect repetitions nor these publisher-described demonstrations should be blanket “correct technique” labels.

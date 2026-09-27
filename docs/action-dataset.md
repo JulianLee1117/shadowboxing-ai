@@ -2,7 +2,7 @@
 
 `ml/action_dataset.py` audits existing local session exports and prepares observed-time action targets. It does not download footage, guess an external annotation format, train a model, grade technique, or supply browser model weights.
 
-The current browser detector (`projected-six-punch-v7-supported-rise`), review annotation interface and Python evaluator accept `jab`, `cross`, `hook`, and `uppercut`, with anatomical hand labels. Lead/rear role distinguishes the six displayed punch identities. Browser recognition uses experimental geometric rules, not a learned multiclass model, and class support does not imply reliable recognition. The experimental trainer in `ml/temporal.py` remains binary per arm: it treats hooks/uppercuts as negative examples and assigns jab/cross from stance. This dataset format is a separate, versioned foundation rather than an incompatible change to that trainer. Do not use that binary trainer as a six-punch baseline.
+The review interface and Python evaluator accept `jab`, `cross`, `hook`, and `uppercut`, with anatomical hand labels. Lead/rear role distinguishes the six displayed punch identities. The optional native local recognizer now combines a personal multiclass temporal model with geometric acceptance rules; the MediaPipe path retains a geometric fallback. Neither class support nor a high model score establishes reliable recognition or correct technique. The older experimental trainer in `ml/temporal.py` remains binary per arm: it treats hooks/uppercuts as negative examples and assigns jab/cross from stance. This dataset tool does not train either model. Do not use that binary trainer as a six-punch baseline.
 
 ## Manifest and commands
 
