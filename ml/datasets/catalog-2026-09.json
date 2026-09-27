@@ -1,8 +1,8 @@
 {
   "schemaVersion": "1.0",
-  "auditDate": "2026-09-26",
+  "auditDate": "2026-09-27",
   "scope": "Six-punch recognition, physical hand, continuous background and observable technique assessment",
-  "notice": "Research catalog, not a license grant. No external media imported and no access agreements accepted. Public code licenses do not establish data or third-party media rights.",
+  "notice": "Research catalog, not a license grant. CoachMe published JSON labels/schema acquired for local inspection; no external RGB media imported, agreements accepted or model updated. Repository terms do not establish access or rights to absent third-party videos.",
   "datasets": [
     {
       "id": "boxingvi",
@@ -34,7 +34,8 @@
       },
       "access": {
         "status": "author_download_link_present_package_unverified",
-        "mediaDownloaded": false
+        "mediaDownloaded": false,
+        "rgbFolderObservation": "RGB_videos publicly listed only Meta_data.ods on 2026-09-27; original video acquisition unverified"
       },
       "licenseAudit": {
         "data": "not_verified",
@@ -411,9 +412,11 @@
     {
       "id": "boxmind",
       "name": "BoxMind BoxingWeb / BoxingStudio",
-      "priority": "release_unverified",
+      "priority": "external_recognition_media_terms_pending",
       "urls": {
-        "paper": "https://arxiv.org/abs/2601.11492"
+        "paper": "https://arxiv.org/abs/2601.11492",
+        "repository": "https://github.com/gouba2333/BoxingWeb",
+        "data": "https://cloud.tsinghua.edu.cn/d/c435311fecda4566ae76/"
       },
       "modality": ["match_video"],
       "annotationKind": "atomic_event_interval_attributes",
@@ -426,18 +429,71 @@
       },
       "qualityLabels": false,
       "access": {
-        "status": "working_official_download_not_verified",
-        "mediaDownloaded": false
+        "status": "official_public_archive_listed_not_downloaded",
+        "mediaDownloaded": false,
+        "archiveName": "boxingweb.rar",
+        "archiveBytes": 5190972710,
+        "separateSmallSampleAvailable": false
       },
       "licenseAudit": {
-        "data": "not_verified_article_CC_BY_is_not_corpus_license",
+        "data": "README_refers_to_absent_LICENSE_original_media_terms_unverified",
         "productTrainingCleared": false,
         "redistributionCleared": false
       },
       "blockers": [
-        "No verified release or dataset terms",
-        "Match effectiveness labels are not solo technique correctness"
+        "Repository refers to LICENSE but no license file found; source-media terms unverified",
+        "Package contents and person/match splits require inspection",
+        "Match effectiveness labels are not solo technique correctness",
+        "BoxingStudio release not independently verified"
       ]
+    },
+    {
+      "id": "coachme-bx",
+      "name": "CoachMe BX",
+      "priority": "technique_reference_and_annotation_audit",
+      "urls": {
+        "repository": "https://github.com/MotionXperts/MotionExpert",
+        "paper": "https://aclanthology.org/2025.acl-long.1413/",
+        "dataset": "https://github.com/MotionXperts/MotionExpert/tree/main/dataset"
+      },
+      "repositoryRevision": "450375b593b1466de201fe5885ebf2916604d382",
+      "modality": [
+        "estimated_3d_pose",
+        "reference_pose",
+        "text_corrections",
+        "alignment_metadata"
+      ],
+      "classes": ["Jab", "Cross"],
+      "annotationKind": "clip_level_instruction_with_alignment_metadata",
+      "qualityLabels": true,
+      "verifiedCounts": {
+        "trainEntries": 163,
+        "testEntries": 41,
+        "originalComments": 612,
+        "augmentedComments": 612,
+        "explicitParticipantIdFields": 0
+      },
+      "access": {
+        "status": "published_JSON_acquired_and_inspected",
+        "mediaDownloaded": false,
+        "rawRgbInPublishedDatasetDirectory": false,
+        "pickleExecuted": false
+      },
+      "licenseAudit": {
+        "repository": "Apache-2.0",
+        "separateDatasetTermsFound": false,
+        "originalRgb": "not_released_in_inspected_directory",
+        "productTrainingCleared": false,
+        "redistributionCleared": false
+      },
+      "blockers": [
+        "Raw source RGB not found in published dataset directory",
+        "Only jabs and crosses; no continuous six-punch/background labels",
+        "Person-independent splits not verified",
+        "Text comments are not criterion-specific verified outcomes; augmented comments are not independent evidence",
+        "Repository license retained; no assumption of rights/access to absent videos"
+      ],
+      "localAudit": "data/external/coachme-bx-audit-2026-09-27/manifest.json"
     }
   ]
 }

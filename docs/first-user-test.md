@@ -14,7 +14,9 @@ Check these three things:
 - Do consecutive punches get distinct rows quickly enough to follow?
 - Do physical L/R match your hands, and which movements were missed or counted incorrectly?
 
-## 2. Label a few existing clips
+## 2. Optionally correct a few existing clips
+
+Your recorded technique is not the reference standard. Imperfect punches still help test recognition; skilled external examples and assessed counterexamples are the priority for learning form. You do not need to label your own technique to unblock that work. See the [data plan](research/expert-reference-data.md).
 
 In **Saved rounds**, choose a recording and click **Coach review**. The original video appears without prediction overlays.
 
@@ -23,7 +25,7 @@ In **Saved rounds**, choose a recording and click **Coach review**. The original
 3. Use **Undo** for a misclick. **Next** can leave a card unanswered. Answers save locally; reload once to check they remain.
 4. Use **Find a missed punch**, scrub the full video, and **Review this moment** to add something the detector missed. Adding a window does not label it automatically.
 
-Start with 10–15 useful examples if you have them. Don't force guard judgments on mixed-action clips. A short new isolated jab/cross drill can supply clearer examples later; no need to redo every saved recording now.
+If you want to help correct recognition, start with 10–15 useful examples. Don't force guard judgments on mixed-action clips or assume a correctly named punch has correct form. No new technique demonstration is required from you.
 
 Labels are supervised review material, not an automatic model update or a technique score. Proposal windows are not verified action boundaries or a complete punch inventory. No video is uploaded.
 

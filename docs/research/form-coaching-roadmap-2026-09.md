@@ -4,6 +4,8 @@ Checked 2026-09-27 against current primary sources and this repository. This is 
 
 ## Recommendation
 
+**September 27 clarification:** the user's imperfect recordings are not positive form references. Prioritize external skilled demonstrations and criterion-reviewed counterexamples; use personal clips for recognition/domain testing and optional judgments. The [updated data plan](expert-reference-data.md) supersedes any suggestion below that the user must author the coaching standard or record perfect demonstrations.
+
 Make confirmed actions easy to see immediately when they arrive; measure the remaining recognition delay separately. Pursue genuine sustained pose throughput next, while preparing one narrow coach-reviewed form criterion in parallel. The first criterion should be **`non_punching_hand_guard` during isolated high-guard jabs/crosses**. More punch labels, higher frame rate and a plausible 3D skeleton do not independently validate technique judgments.
 
 ### 1. A small action log, not a queue of popups
@@ -61,7 +63,7 @@ python3 -m ml.coaching check NEW-review-packet/packet.json reviewer-a.json
 python3 -m ml.coaching compare NEW-review-packet/packet.json reviewer-a.json reviewer-b.json --output agreement.json
 ```
 
-The packet input needs independently authored action references. Its judgment vocabulary is `pass`, `fail`, `ambiguous`, `unobservable`, `not_applicable`, or `not_reviewed`; whether feedback is warranted remains separate. The user has identified themselves as the coach: their self-reported expertise and own judgments are sufficient to begin personal supervised labeling now, with no credential check or external-review prerequisite. Another reviewer and preserved disagreements are later validation recommendations, particularly before generalizing to other people or publishing broad coaching claims. A label used for training is not independent test evidence, even when authored by an experienced coach.
+The packet input needs independently authored action references. Its judgment vocabulary is `pass`, `fail`, `ambiguous`, `unobservable`, `not_applicable`, or `not_reviewed`; whether feedback is warranted remains separate. The user can author action corrections and provisional observations now; their recordings and self-description do not establish correct-form references. Skilled demonstrations, acceptable variations and assessed faults need their own criterion review. Another reviewer and preserved disagreements are later validation recommendations, particularly before generalizing to other people or publishing broad coaching claims. A label used for training is not independent test evidence, even when authored by an experienced coach.
 
 **Personal labeling now:** the local clip-card workflow exports `local-coach-review-1`. Detector proposals supply navigation only; the user first confirms the actual physical-hand action, “Not a punch,” or “Can't tell.” Confirmed straights then offer “Guard held,” “Needs work,” “Can't tell,” and “Not this drill/style,” with notes for acceptable variation. Unanswered cards remain unreviewed. A manual full-video moment selector covers missed detections without pretending the proposed queue is complete. Original video, events and action references remain separate; each review is pinned to source/video fingerprints. This is supervised labeling, not reinforcement learning, and it does not automatically train or activate a model. The new format is not falsely presented as a completed independent `ml.coaching` review.
 
@@ -84,6 +86,6 @@ The boxing-specific [Lahkar et al. study](https://www.frontiersin.org/journals/s
 
 1. **Now:** direct confirmed action history, per-event arrival visibility and timing instrumentation; no change to what counts as a detection merely to make the UI feel faster.
 2. **Next engineering gate:** isolate the measured capture/transport/inference bottleneck, benchmark one change at a time, and establish actual sustained observed cadence. Keep the simple single-camera workflow.
-3. **In parallel:** use the user's coach-authored clip labels and the prepared guard-review packets to settle the personal context/view rubric. Build a video-backed observation extractor, initially visible only in review/development.
+3. **In parallel:** use external skilled references, assessed counterexamples and the prepared guard-review packets to settle the context/view rubric; user-authored observations remain separately attributed. Build a video-backed observation extractor, initially visible only in review/development.
 4. **After criterion validation:** enable one specific, evidence-linked cue in guided practice, with abstention and a cooldown validated for usefulness. Review outcomes before adding recovery or combinations.
 5. **If evidence remains insufficient:** select one RGB or additional-view experiment from the diagnosed failure type. More sensors/models are justified by improved assessability and fewer wrong claims, not novelty.

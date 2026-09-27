@@ -2,6 +2,8 @@
 
 Reviewed September 27, 2026. The immediate priority is consistent recognition on a new round. The wider product goals remain in [the project plan](project-plan.md).
 
+**Data priority correction:** the user's recordings are examples of the target webcam domain, not a standard of correct boxing. Prioritize external skilled demonstrations plus explicitly assessed mistakes/acceptable variations for form, and varied skilled/imperfect actions for recognition. [The revised acquisition plan](research/expert-reference-data.md) separates these roles. The user does not need to supply perfect technique or label their own videos as the coaching foundation.
+
 ## Current product loop
 
 Choose a lead hand and duration, enable the camera, then start the countdown and step back. The skeleton, persistent punch history and running count provide live feedback. Finishing opens the original video and live results immediately. A full video pass is optional; it is useful for diagnosis, not a required step or a promise of better recognition.
@@ -14,7 +16,7 @@ The latest round exposes two distinct problems: patchy right elbow/wrist observa
 
 1. On existing development footage, mark visible wrist/elbow pixels and physical hand for curved-action and guard windows. Compare one fixed observation challenger (pose or short RGB-plus-pose), measuring localization, false guard counts and whole-event outcomes together.
 2. Separately diagnose causal phase/cycle behavior for fully tracked short and repeated straights. Freeze a protocol before fitting; do not change pose gates to mask classifier errors.
-3. Use **Coach review** for the user's explicit action and guard judgments. Start with 10–15 isolated high-guard straight examples; mixed-combination windows may be not applicable. Add missed moments and ordinary non-punch movement. These selected windows do not certify complete annotation or exact action bounds.
+3. Build the external skilled-reference and counterexample collection. Use **Coach review** as an optional labeling interface for source recordings; user cards can correct action identity without certifying good form. Form examples need explicit context and assessment, and mixed-combination windows may be not applicable. Add missed moments and ordinary non-punch movement. Selected windows do not certify complete annotation or exact action bounds.
 4. Keep an untouched later-day round for the next frozen candidate. Report occurrence, interval coverage, false counts, observed pose cadence and actual delay separately. Evaluate one coaching cue only after its visible hand/head evidence and context rubric are reliable.
 
 The first labels are supervised review material, not reinforcement learning and not an immediate model update. [The form roadmap](research/form-coaching-roadmap-2026-09.md) explains why genuine pose throughput, clear source pixels and guarded abstention matter more than a nominal 30 fps label.
@@ -43,12 +45,12 @@ Focused image/pose comparisons found no gross active-hand swap in the missed cur
 
 ## Next acceptance checks
 
-| Priority | Work | Evidence required before shipping |
-| --- | --- | --- |
-| 1. Validate the frozen version on a fresh round | Record comfortable singles, quick repetitions, hooks/uppercuts and deliberate non-punch guard movements. Review video before predictions. | Report hand/family occurrence, interval timing, false idle counts and delayed detections separately. Preserve the whole round as held-out evidence until that assessment is complete. |
-| 2. Broaden background and posture coverage | Add distinct continuous sessions with relaxed arm lowering, guard changes, turning and varied trajectories. Group every pose version with its original video. | Preserve ordinary-round matches and reduce actual non-punch counts. Do not tune thresholds repeatedly on the same pair of clips or mistake boundary mismatches for new motions. |
-| 3. Complete webcam performance acceptance | Measure successive foreground webcam rounds, including callback-to-inference delay, skipped observations, cleanup and detection delay. | Report real webcam measurements separately from the repeated imported-file stress run. Do not use source-video fps as processing throughput. |
-| 4. Add one useful coaching cue | With a boxing coach, define one visually observable criterion and acceptable variants, then label examples and counterexamples independently. | High cue precision and explicit abstention on unobservable views; punch classification alone never becomes a form grade. |
+| Priority                                        | Work                                                                                                                                                          | Evidence required before shipping                                                                                                                                                     |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Validate the frozen version on a fresh round | Record comfortable singles, quick repetitions, hooks/uppercuts and deliberate non-punch guard movements. Review video before predictions.                     | Report hand/family occurrence, interval timing, false idle counts and delayed detections separately. Preserve the whole round as held-out evidence until that assessment is complete. |
+| 2. Broaden background and posture coverage      | Add distinct continuous sessions with relaxed arm lowering, guard changes, turning and varied trajectories. Group every pose version with its original video. | Preserve ordinary-round matches and reduce actual non-punch counts. Do not tune thresholds repeatedly on the same pair of clips or mistake boundary mismatches for new motions.       |
+| 3. Complete webcam performance acceptance       | Measure successive foreground webcam rounds, including callback-to-inference delay, skipped observations, cleanup and detection delay.                        | Report real webcam measurements separately from the repeated imported-file stress run. Do not use source-video fps as processing throughput.                                          |
+| 4. Add one useful coaching cue                  | With a boxing coach, define one visually observable criterion and acceptable variants, then label examples and counterexamples independently.                 | High cue precision and explicit abstention on unobservable views; punch classification alone never becomes a form grade.                                                              |
 
 Keep a small untouched later-day check before claiming a new personal model is more reliable. Broader support requires additional people, stances, backgrounds and camera angles held out by person/session. More clips of one recording or synthetic views of one motion are not independent evaluation samples.
 

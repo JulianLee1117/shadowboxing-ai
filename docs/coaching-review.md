@@ -2,7 +2,7 @@
 
 ## In-app coach cards
 
-Saved original videos now offer **Coach review**. The user is a self-reported coach; no additional credential or external reviewer is required to collect these personal judgments. Confirm physical-hand/action identity before judging the non-punching hand during an isolated high-guard straight. A detected event supplies only a navigation marker. **Find a missed punch** adds a manual window from the full video. Hooks, uppercuts, non-punches and uncertain identities receive no automatic form rubric.
+Saved original videos now offer **Coach review**. These collect personal judgments; the stored reviewer self-description does not establish annotation accuracy. The user has clarified that their recorded technique should not define correct form. Skilled references and assessed counterexamples are the priority in the [data plan](research/expert-reference-data.md). Confirm physical-hand/action identity before judging the non-punching hand during an isolated high-guard straight. A detected event supplies only a navigation marker. **Find a missed punch** adds a manual window from the full video. Hooks, uppercuts, non-punches and uncertain identities receive no automatic form rubric.
 
 Answers persist separately on the session, with source/video hashes, stance, window bounds, proposal provenance and reviewer expertise `coach_self_reported`. The UI supports local playback, notes, Undo and export. Failed writes keep the card uncommitted and offer retry, draft export or discard; concurrent coaching edits are rejected, and annotation writes preserve the latest coaching labels.
 
