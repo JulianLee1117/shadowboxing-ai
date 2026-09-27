@@ -86,6 +86,10 @@ export function RoundReview({
   const duration = selected?.durationMs ?? 0;
   const sessionId = selected?.id;
   const videoBlob = selected?.video;
+  const sourceCallbackFps =
+    selected?.capture?.timingSource === "requestVideoFrameCallback"
+      ? selected.capture.sourceCadence?.callbackFps
+      : null;
   // The identity check also prevents stale results during a round-switch render.
   const updated =
     recheck &&
@@ -1006,6 +1010,14 @@ export function RoundReview({
                   <dt>Pose rate</dt>
                   <dd>{selected.measuredFps.toFixed(1)} fps</dd>
                 </div>
+                {typeof sourceCallbackFps === "number" &&
+                  Number.isFinite(sourceCallbackFps) &&
+                  sourceCallbackFps > 0 && (
+                    <div>
+                      <dt>Video delivery rate</dt>
+                      <dd>{sourceCallbackFps.toFixed(1)} fps</dd>
+                    </div>
+                  )}
                 <div>
                   <dt>Inference p95</dt>
                   <dd>{Math.round(selected.inferenceP95)} ms</dd>

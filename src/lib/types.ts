@@ -109,7 +109,9 @@ export interface Session {
     width: number;
     height: number;
     requestedFps?: number;
-    deliveredFps?: number;
+    deliveredFps?: number; // legacy: track settings, not measured delivery
+    trackSettingsFps?: number;
+    sourceCadence?: import("./sourceCadence").SourceCadenceSummary;
     timingSource: string;
     delegate: string;
   };

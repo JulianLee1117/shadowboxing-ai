@@ -11,6 +11,7 @@ import type {
 import { VisionRunner, type PreparedVisionFrame } from "../lib/vision";
 import { LocalPoseBusyError } from "../lib/localPoseClient";
 import { LatestFramePump } from "../lib/latestFramePump";
+import { SourceCadence } from "../lib/sourceCadence";
 import {
   nativeDetectorVersion,
   relativePoseFrame,
@@ -46,6 +47,7 @@ interface RoundData {
   source: SourceKind;
   model: ModelVariant | "synthetic";
   capture: Session["capture"];
+  sourceCadence: SourceCadence | null;
   modelManifest: unknown;
   detectorVersion: string;
 }
@@ -246,7 +248,9 @@ export function useStudio(onComplete: (session: Session) => void) {
         skippedFrames: data.skipped,
         modelManifest: data.modelManifest,
         detectorVersion: data.detectorVersion,
-        capture: data.capture,
+        capture: data.capture
+          ? { ...data.capture, sourceCadence: data.sourceCadence?.summary() }
+          : undefined,
       };
       complete.current(session);
     })().finally(() => {
@@ -407,9 +411,16 @@ export function useStudio(onComplete: (session: Session) => void) {
         // Seeking a paused uploaded clip can itself issue a video-frame callback.
         // Its frame is used for warmup, not queued ahead of the next round.
         if (sourceRef.current === "file" && video.paused) return;
+        const observedAt = performance.now();
+        const data = round.current;
+        if (data && mediaMs >= data.start)
+          data.sourceCadence?.observe(
+            mediaMs - data.start,
+            observedAt - data.startedAt,
+          );
         if (mediaMs === lastMedia.current) return;
         lastMedia.current = mediaMs;
-        pump.push(video, mediaMs, performance.now());
+        pump.push(video, mediaMs, observedAt);
       };
       const video = videoRef.current;
       if (sourceRef.current !== "demo" && video?.requestVideoFrameCallback) {
@@ -600,6 +611,7 @@ export function useStudio(onComplete: (session: Session) => void) {
         frames: [],
         events: [],
         skipped: 0,
+        sourceCadence: kind === "demo" ? null : new SourceCadence(),
         id: crypto.randomUUID(),
         createdAt: new Date().toISOString(),
         source: kind,
@@ -611,7 +623,7 @@ export function useStudio(onComplete: (session: Session) => void) {
           width: kind === "demo" ? 1280 : (videoRef.current?.videoWidth ?? 0),
           height: kind === "demo" ? 720 : (videoRef.current?.videoHeight ?? 0),
           requestedFps: kind === "camera" ? 30 : undefined,
-          deliveredFps: trackSettings?.frameRate,
+          trackSettingsFps: trackSettings?.frameRate,
           timingSource:
             kind === "demo"
               ? "synthetic"

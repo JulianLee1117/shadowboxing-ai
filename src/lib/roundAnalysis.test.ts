@@ -39,7 +39,7 @@ describe("saved video analysis plan", () => {
     expect(createAnalysisPlan(s)).toMatchObject({
       fps: 60,
       frameCount: 60,
-      cadenceSource: "recorded camera cadence",
+      cadenceSource: "legacy reported camera frame rate",
       truncated: false,
     });
     expect(s.frames.map((f) => f.t)).toEqual([0, 100]);
@@ -53,6 +53,23 @@ describe("saved video analysis plan", () => {
     expect(createAnalysisPlan(session())).toMatchObject({
       fps: 30,
       cadenceSource: "30 fps planning estimate; source cadence not recorded",
+    });
+  });
+  it("keeps camera settings separate from callback delivery when planning original-video decoding", () => {
+    const s = session({
+      capture: {
+        width: 640,
+        height: 360,
+        trackSettingsFps: 30,
+        deliveredFps: 10,
+        timingSource: "requestVideoFrameCallback",
+        delegate: "CPU",
+      },
+      frames: [demoFrame(0), demoFrame(100)],
+    });
+    expect(createAnalysisPlan(s)).toMatchObject({
+      fps: 30,
+      cadenceSource: "reported camera frame rate",
     });
   });
   it("caps work and preserves a valid source-video offset", () => {

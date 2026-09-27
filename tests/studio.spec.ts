@@ -1187,16 +1187,20 @@ test("a late in-flight camera frame stays inside the frozen media duration", asy
     page.getByRole("button", { name: "Stop & save", exact: true }),
   ).toBeVisible();
   await page.clock.fastForward(29_850);
-  await page.evaluate(() => {
-    const state = window as unknown as {
-      mediaMs: number;
-      callback: VideoFrameRequestCallback;
-    };
-    state.mediaMs = 40_040;
-    state.callback(performance.now(), {
-      mediaTime: 40.015,
-    } as VideoFrameCallbackMetadata);
-  });
+  const callbackTimes = [
+    await page.evaluate(() => {
+      const state = window as unknown as {
+        mediaMs: number;
+        callback: VideoFrameRequestCallback;
+      };
+      state.mediaMs = 40_040;
+      const now = performance.now();
+      state.callback(now, {
+        mediaTime: 40.015,
+      } as VideoFrameCallbackMetadata);
+      return now;
+    }),
+  ];
   await expect
     .poll(() =>
       page.evaluate(
@@ -1205,9 +1209,34 @@ test("a late in-flight camera frame stays inside the frozen media duration", asy
       ),
     )
     .toBe(true);
+  // Source callbacks continue while inference is held. They must be counted
+  // separately from the one result that survives the closing boundary.
+  for (const mediaTime of [40.048, 40.081]) {
+    await page.clock.runFor(30);
+    callbackTimes.push(
+      await page.evaluate((mediaTime) => {
+        const state = window as unknown as {
+          mediaMs: number;
+          callback: VideoFrameRequestCallback;
+        };
+        state.mediaMs = 40_100;
+        const now = performance.now();
+        state.callback(now, {
+          mediaTime,
+        } as VideoFrameCallbackMetadata);
+        return now;
+      }, mediaTime),
+    );
+  }
   // The frame is captured before closing, but its result arrives after the
   // wall-clock duration has frozen. Its media time must still fit the export.
   await page.clock.fastForward(200);
+  await page.evaluate(() => {
+    const state = window as unknown as { callback: VideoFrameRequestCallback };
+    state.callback(performance.now(), {
+      mediaTime: 41,
+    } as VideoFrameCallbackMetadata);
+  });
   await page.evaluate(() =>
     (window as unknown as { pendingReply: () => void }).pendingReply(),
   );
@@ -1216,6 +1245,30 @@ test("a late in-flight camera frame stays inside the frozen media duration", asy
   ).toBeVisible();
   const saved = await readExport(page);
   expect(saved.frames).toHaveLength(1);
+  expect(saved.capture?.sourceCadence).toMatchObject({
+    observations: 3,
+    duplicates: 0,
+    regressions: 0,
+    gapMs: { samples: 2, complete: true },
+  });
+  expect(saved.capture?.sourceCadence?.mediaSpanMs).toBeCloseTo(66);
+  const callbackSpanMs = callbackTimes.at(-1)! - callbackTimes[0];
+  expect(callbackSpanMs).toBeGreaterThanOrEqual(60);
+  expect(saved.capture?.sourceCadence?.callbackSpanMs).toBeCloseTo(
+    callbackSpanMs,
+  );
+  expect(saved.capture?.sourceCadence?.callbackFps).toBeCloseTo(
+    2000 / callbackSpanMs,
+  );
+  expect(saved.capture?.trackSettingsFps).toBeGreaterThan(0);
+  expect(saved.capture?.deliveredFps).toBeUndefined();
+  await expect(
+    page.getByText("Video delivery rate", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "artifacts/ui/source-delivery-review.png",
+    fullPage: true,
+  });
   expect(saved.frames[0].t).toBeCloseTo(30_015);
   expect(saved.durationMs).toBeGreaterThanOrEqual(saved.frames[0].t);
   expect(saved.durationMs).toBeLessThan(30_200);

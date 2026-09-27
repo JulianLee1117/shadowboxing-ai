@@ -117,7 +117,8 @@ export function createAnalysisPlan(session: Session) {
     .filter((gap) => Number.isFinite(gap) && gap > 0)
     .sort((a, b) => a - b);
   const candidates: [number | undefined, string][] = [
-    [session.capture?.deliveredFps, "recorded camera cadence"],
+    [session.capture?.trackSettingsFps, "reported camera frame rate"],
+    [session.capture?.deliveredFps, "legacy reported camera frame rate"],
     [
       gaps.length ? 1000 / gaps[Math.floor(gaps.length / 2)] : undefined,
       "saved frame median cadence",

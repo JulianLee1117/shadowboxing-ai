@@ -2,7 +2,7 @@
   "schemaVersion": "1.0",
   "auditDate": "2026-09-27",
   "scope": "Six-punch recognition, physical hand, continuous background and observable technique assessment",
-  "notice": "Research catalog, not a license grant. CoachMe published JSON and the official BoxingWeb RGB archive acquired for local inspection; only one BoxingWeb video and all 50 JSONs extracted. No agreements accepted, pose pickles executed, external-media training or model activation. Original media training/redistribution rights remain unverified.",
+  "notice": "Research catalog, not a license grant. CoachMe JSON, the official BoxingWeb archive, four DVIDS demonstrations and two auxiliary Commons clips acquired for local inspection; only one BoxingWeb video and all 50 JSONs extracted. DVIDS source items explicitly declare public domain with use-notice limitations; BoxingWeb media rights and other source-specific blockers remain unresolved. No agreements accepted, pose pickles executed, external-media training or model activation.",
   "datasets": [
     {
       "id": "boxingvi",
@@ -507,17 +507,26 @@
         "height": 720,
         "fps": 30,
         "containerDurationSecondsApprox": 84.03,
-        "videoStreamStartPtsSeconds": 0.032993,
         "punchRows": 62,
         "setSideRows": 1,
         "allSixPhysicalHandFamilies": true,
         "reviewedFrames": 18,
         "reviewPurpose": "bounded scene and label-schema inspection; not complete annotation correctness or form validation",
         "normalizedAnnotationRows": 63,
-        "nativePtsFrameMappings": 18,
+        "nativePtsFrameMappings": 2521,
         "decoderRelativeFrameMappings": 60,
         "normalizedManifestTrainingEligible": false,
-        "normalizedManifest": "data/external/boxingweb-inspection-2026-09-27/sample-normalized-annotations.json"
+        "normalizedManifest": "data/external/boxingweb-inspection-2026-09-27/sample-normalized-annotations-final.json",
+        "previousNormalizedManifest": "data/external/boxingweb-inspection-2026-09-27/sample-normalized-annotations.json",
+        "nativeTimestampManifest": "data/external/boxingweb-inspection-2026-09-27/sample-native-timestamps-final.json",
+        "nativePunchIntervalsBound": 62,
+        "nativeTimeBase": "1/15360",
+        "nativeFirstPtsTicks": 507,
+        "nativeFirstPtsSeconds": 0.0330078125,
+        "nativeLastPtsTicks": 1291771,
+        "nativeLastPtsSeconds": 84.09967447916667,
+        "finalNativeStepMs": 100,
+        "containerReportedStreamStartSeconds": 0.032993
       },
       "localAudit": "data/external/boxingweb-inspection-2026-09-27/download-provenance.json",
       "annotationProvenanceAudit": {
@@ -543,8 +552,9 @@
         "decodedFramesPerRun": 30,
         "openingPeoplePerFrameRange": [8, 13],
         "hookPeoplePerFrameRange": [2, 5],
-        "timeSemantics": "OpenCV decoder-relative timestamps plus zero-based decoded frame indices; native PTS binding unresolved",
-        "localEvidence": "data/pilot/external-rgb-pose-inspection-v1/smoke-validation.json"
+        "timeSemantics": "Original decoder-relative values preserved; complete 2521-frame native map supports frame-index joins. Sixty audited pairs have 33.0078125 ms offset, not a universal correction rule.",
+        "localEvidence": "data/pilot/external-rgb-pose-inspection-v1/smoke-validation.json",
+        "nativeMapStatus": "complete_separate_artifact_no_source_overwrite"
       }
     },
     {
@@ -594,6 +604,94 @@
         "Repository license retained; no assumption of rights/access to absent videos"
       ],
       "localAudit": "data/external/coachme-bx-audit-2026-09-27/manifest.json"
+    },
+    {
+      "id": "dvids-tecom-demo-2020",
+      "name": "TECOM four solo punch demonstrations",
+      "priority": "bounded_external_action_observation",
+      "urls": {
+        "dvids-uppercut": "https://www.dvidshub.net/video/756817/uppercut",
+        "dvids-hook": "https://www.dvidshub.net/video/756773/hook",
+        "dvids-lead": "https://www.dvidshub.net/video/756778/lead-hand-punch",
+        "dvids-rear": "https://www.dvidshub.net/video/756805/rear-hand-punch",
+        "reuseNotice": "https://www.dvidshub.net/about/copyright"
+      },
+      "creator": "Bruce Hardcastle",
+      "publisher": "U.S. Marine Corps Training and Education Command",
+      "creationDate": "2020-06-19",
+      "modality": ["rgb_video"],
+      "annotationKind": "source_titles_plus_separate_provisional_assistant_action_review",
+      "classes": [
+        "left_straight",
+        "right_straight",
+        "left_hook",
+        "right_uppercut"
+      ],
+      "qualityLabels": false,
+      "access": {
+        "status": "four_public_player_renditions_acquired_and_native_timestamped",
+        "mediaDownloaded": true,
+        "mediaBytes": 16166269,
+        "cameraOriginalsVerified": false,
+        "agreementAccepted": false
+      },
+      "licenseAudit": {
+        "mediaDeclaration": "Each official source item explicitly declares PUBLIC DOMAIN",
+        "declarationEvidence": "Saved individual source pages and linked DVIDS use notice; independent audit retained",
+        "limitations": [
+          "Preserve source attribution and non-endorsement",
+          "DVIDS notice retains privacy/publicity and possible third-party interests; no independent model-release claim"
+        ],
+        "trainingStatus": "No training; four provisional action examples are insufficient for promotion",
+        "redistributionStatus": "Media remains local and ignored; none redistributed"
+      },
+      "observedCounts": {
+        "clips": 4,
+        "nativeFrames": 516,
+        "nativeTimeBase": "1/24000",
+        "nativeStepTicks": 1001,
+        "apparentPeople": 1,
+        "sourceGroups": 1,
+        "completeVisibleActions": 4
+      },
+      "sourceFiles": [
+        {
+          "id": "dvids-uppercut",
+          "bytes": 4817814,
+          "sha256": "c8e40d358a8e7b7c63058bf98c88e38b36f8d88778517c93a0cdc367b199061a"
+        },
+        {
+          "id": "dvids-hook",
+          "bytes": 4755525,
+          "sha256": "55bcc5a5a1ef6c9aa9e35f7de4c48d36831293700fa7c49d5fe73b04a3d03899"
+        },
+        {
+          "id": "dvids-lead",
+          "bytes": 2650910,
+          "sha256": "646e6396d4c2b4181f1c11d933cc87a10e65b2491a5345c54158976e9c19cb03"
+        },
+        {
+          "id": "dvids-rear",
+          "bytes": 3942020,
+          "sha256": "03634d98ca91ccb0164c6e9b7500b849340d6844fdf555386faf7df701bcbefa"
+        }
+      ],
+      "localAudit": "data/external/solo-boxing-audit-2026-09-27/inspection.json",
+      "provisionalActionReference": "data/external/solo-boxing-audit-2026-09-27/dvids-action-reference-v1.json",
+      "baselineObservation": {
+        "localEvidence": "data/pilot/dvids-baseline-v1/README.md",
+        "protocolSha256": "90db224caecb49f7508e591b077f4d834d23aa8934439174be0cd27109de3265",
+        "processedNativeFrames": 516,
+        "emittedEvents": 0,
+        "scope": "Descriptive full-clip smoke only; four related provisional actions cannot estimate accuracy or support training promotion"
+      },
+      "blockers": [
+        "No rear/right hook or left uppercut, natural combinations or person-separated split",
+        "Publisher MCMAP demonstration does not certify sport-boxing technique or faults",
+        "Titlecards and limited setup give short causal valid-person context",
+        "Approximate independently assistant-reviewed phase ranges; no scalar gold peaks or human expert assessment",
+        "Public-player frame cadence does not establish sensor exposure or absence of editing/retiming"
+      ]
     }
   ]
 }
