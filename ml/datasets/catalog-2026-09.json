@@ -2,7 +2,7 @@
   "schemaVersion": "1.0",
   "auditDate": "2026-09-27",
   "scope": "Six-punch recognition, physical hand, continuous background and observable technique assessment",
-  "notice": "Research catalog, not a license grant. CoachMe published JSON labels/schema acquired for local inspection; no external RGB media imported, agreements accepted or model updated. Repository terms do not establish access or rights to absent third-party videos.",
+  "notice": "Research catalog, not a license grant. CoachMe published JSON and the official BoxingWeb RGB archive acquired for local inspection; only one BoxingWeb video and all 50 JSONs extracted. No agreements accepted, pose pickles executed, external-media training or model activation. Original media training/redistribution rights remain unverified.",
   "datasets": [
     {
       "id": "boxingvi",
@@ -411,41 +411,141 @@
     },
     {
       "id": "boxmind",
-      "name": "BoxMind BoxingWeb / BoxingStudio",
-      "priority": "external_recognition_media_terms_pending",
+      "name": "BoxMind / BoxingWeb (BoxingStudio release unverified)",
+      "priority": "acquired_recognition_inspection_media_terms_pending",
       "urls": {
         "paper": "https://arxiv.org/abs/2601.11492",
         "repository": "https://github.com/gouba2333/BoxingWeb",
-        "data": "https://cloud.tsinghua.edu.cn/d/c435311fecda4566ae76/"
+        "data": "https://cloud.tsinghua.edu.cn/d/c435311fecda4566ae76/",
+        "download": "https://cloud.tsinghua.edu.cn/d/c435311fecda4566ae76/files/?p=%2Fboxingweb.rar&dl=1"
       },
-      "modality": ["match_video"],
+      "modality": [
+        "rgb_match_video",
+        "event_json",
+        "estimated_pose_pickle_unopened"
+      ],
       "annotationKind": "atomic_event_interval_attributes",
       "labelAxes": {
         "family": ["straight", "hook", "uppercut"],
-        "role": ["lead", "rear"],
-        "target": ["head", "torso"],
-        "range": ["long", "mid", "close"],
-        "effect": ["effective", "ineffective"]
+        "physicalHand": ["left", "right"],
+        "boxerColor": ["red", "blue"],
+        "target": ["head", "chest", "abdomen"],
+        "distance": ["long", "medium", "close"],
+        "effect": ["effective", "ineffective"],
+        "foulFlag": [false, true]
       },
       "qualityLabels": false,
       "access": {
-        "status": "official_public_archive_listed_not_downloaded",
-        "mediaDownloaded": false,
+        "status": "full_official_archive_acquired_one_rgb_sample_and_all_json_inspected",
+        "mediaDownloaded": true,
         "archiveName": "boxingweb.rar",
         "archiveBytes": 5190972710,
-        "separateSmallSampleAvailable": false
+        "archiveSha256": "9ce5052f55f9c256dd118c6c58ce3e3c32c6d74e11ae34b4bb8842fb50fd2ba8",
+        "separateSmallSampleAvailable": false,
+        "extractedVideoCount": 1,
+        "extractedJsonCount": 50,
+        "extractedJsonBytes": 1578439,
+        "pickleExtractedOrExecuted": false,
+        "agreementAccepted": false,
+        "boxingStudioInArchive": false
       },
       "licenseAudit": {
         "data": "README_refers_to_absent_LICENSE_original_media_terms_unverified",
         "productTrainingCleared": false,
-        "redistributionCleared": false
+        "redistributionCleared": false,
+        "archiveLicenseOrTermsFileFound": false
       },
       "blockers": [
-        "Repository refers to LICENSE but no license file found; source-media terms unverified",
-        "Package contents and person/match splits require inspection",
-        "Match effectiveness labels are not solo technique correctness",
-        "BoxingStudio release not independently verified"
-      ]
+        "No verified source-media training/redistribution grant; absent repository LICENSE and archive terms",
+        "Seven literal athlete names span release splits; resolve identities and source broadcasts before person-separated evaluation",
+        "316 invalid/zero punch intervals and 34 further durations rejected by author filter; preserve exclusions and do not invent background",
+        "104 confidence-bearing rows in one 107-row test round have unresolved model/human provenance; quarantine whole round pending review",
+        "No stance, peak, exhaustive non-punch or technique-correctness labels; effectiveness/foul flags are different tasks",
+        "Two boxers, referee, cuts and occlusion require actor association and source-time audit before webcam transfer",
+        "Optional author pose-map branch conditions on labeled hand; do not leak this into label-free inference",
+        "BoxingStudio release not present in inspected archive"
+      ],
+      "repositoryRevision": "e06add251e31fe7db8db9fffcb705636484eb264",
+      "stanceLabels": false,
+      "annotationFrameConvention": "zero_based_inclusive_end_in_author_loader",
+      "peakLabels": false,
+      "backgroundCompleteness": "unverified_positive_event_dataset_no_complete_negative_labels",
+      "observedCounts": {
+        "archiveMembers": 203,
+        "rgbVideos": 50,
+        "jsonFiles": 50,
+        "posePickles": 50,
+        "trainRounds": 40,
+        "testRounds": 10,
+        "annotationRows": 6910,
+        "punchRows": 6872,
+        "setSideRows": 36,
+        "emptyNameRows": 2,
+        "invalidOrZeroPunchIntervals": 316,
+        "positiveDurationPunchIntervals": 6556,
+        "positiveDurationOutsideAuthorFilter": 34,
+        "authorDurationFilterPassingPunches": 6522,
+        "foulTrueRows": 10,
+        "confidenceFieldsPresentRows": 104,
+        "literalTrainMatchNames": 36,
+        "literalTestMatchNames": 10,
+        "literalMatchNameOverlap": 0,
+        "literalAthleteNameOverlap": 7
+      },
+      "rawPunchClassCounts": {
+        "lstraight": 1903,
+        "rstraight": 1547,
+        "lhook": 1268,
+        "rhook": 1097,
+        "luppercut": 538,
+        "ruppercut": 519
+      },
+      "sample": {
+        "videoBytes": 24225852,
+        "videoSha256": "131b0bd1663ca5d35abc13e2bb2d83bcd492dd3b27021973f8c7ed4c28485294",
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "containerDurationSecondsApprox": 84.03,
+        "videoStreamStartPtsSeconds": 0.032993,
+        "punchRows": 62,
+        "setSideRows": 1,
+        "allSixPhysicalHandFamilies": true,
+        "reviewedFrames": 18,
+        "reviewPurpose": "bounded scene and label-schema inspection; not complete annotation correctness or form validation",
+        "normalizedAnnotationRows": 63,
+        "nativePtsFrameMappings": 18,
+        "decoderRelativeFrameMappings": 60,
+        "normalizedManifestTrainingEligible": false,
+        "normalizedManifest": "data/external/boxingweb-inspection-2026-09-27/sample-normalized-annotations.json"
+      },
+      "localAudit": "data/external/boxingweb-inspection-2026-09-27/download-provenance.json",
+      "annotationProvenanceAudit": {
+        "humanOriginVerified": false,
+        "confidenceContainingFiles": 1,
+        "confidenceContainingRoundRows": 107,
+        "confidenceFieldsRows": 104,
+        "confidenceRowsInvalidOrZero": 18,
+        "confidenceRowsPassingDurationFilter": 86,
+        "unscoredRowsInSameRound": 3,
+        "modelProducedVsHumanReviewed": "unresolved; not documented in inspected README/loader/train.py",
+        "conservativeQuarantine": "entire 107-row confidence-containing test round",
+        "remainingFiles": 49,
+        "remainingDurationFilterPassingRows": 6433,
+        "countMeaning": "structural duration filter only, not verified human labels or training eligibility"
+      },
+      "inspectionAdapter": {
+        "status": "private_local_rgb_and_native_pose_smokes_completed",
+        "trainingEligible": false,
+        "actionLabelsConsumed": false,
+        "actorIdentityAssigned": false,
+        "runs": 2,
+        "decodedFramesPerRun": 30,
+        "openingPeoplePerFrameRange": [8, 13],
+        "hookPeoplePerFrameRange": [2, 5],
+        "timeSemantics": "OpenCV decoder-relative timestamps plus zero-based decoded frame indices; native PTS binding unresolved",
+        "localEvidence": "data/pilot/external-rgb-pose-inspection-v1/smoke-validation.json"
+      }
     },
     {
       "id": "coachme-bx",

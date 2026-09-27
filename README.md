@@ -50,6 +50,8 @@ An optional [local RTMPose service](docs/local-pose.md) now connects a persisten
 
 The [six-punch dataset tools](docs/action-dataset.md) prepare physical-hand/stance labels, preserve unknown targets and check split leakage for learned recognition experiments. A separate [coaching-review workflow](docs/coaching-review.md) collects independent human criterion labels and agreement without model predictions or automatic grades. Neither tool supplies trained browser weights or technique advice. The [current external-data audit](docs/research/boxing-datasets-2026-09.md) records verified access and reuse gaps. The [short capture protocol](docs/six-punch-capture.md) describes useful hook/uppercut examples and non-punch movements.
 
+The [RGB+pose inspection CLI](docs/rgb-pose-inspection.md) extracts bounded local image and native pose features from external footage, preserving all detected people and source provenance. It is separate from the live webcam service and does not train or assign boxer identities. [The acquired-data audit](docs/research/expert-reference-data.md) records the actual BoxingWeb footage and annotation findings.
+
 ## Verify and evaluate
 
 ```sh

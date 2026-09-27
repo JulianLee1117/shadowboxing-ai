@@ -16,10 +16,20 @@ The latest round exposes two distinct problems: patchy right elbow/wrist observa
 
 1. On existing development footage, mark visible wrist/elbow pixels and physical hand for curved-action and guard windows. Compare one fixed observation challenger (pose or short RGB-plus-pose), measuring localization, false guard counts and whole-event outcomes together.
 2. Separately diagnose causal phase/cycle behavior for fully tracked short and repeated straights. Freeze a protocol before fitting; do not change pose gates to mask classifier errors.
-3. Build the external skilled-reference and counterexample collection. Use **Coach review** as an optional labeling interface for source recordings; user cards can correct action identity without certifying good form. Form examples need explicit context and assessment, and mixed-combination windows may be not applicable. Add missed moments and ordinary non-punch movement. Selected windows do not certify complete annotation or exact action bounds.
+3. Build the external skilled-reference and counterexample collection. Use **Correct punches** as an optional labeling interface for source recordings; user cards can correct action identity without certifying good form. Form examples need explicit context and assessment, and mixed-combination windows may be not applicable. Add missed moments and ordinary non-punch movement. Selected windows do not certify complete annotation or exact action bounds.
 4. Keep an untouched later-day round for the next frozen candidate. Report occurrence, interval coverage, false counts, observed pose cadence and actual delay separately. Evaluate one coaching cue only after its visible hand/head evidence and context rubric are reliable.
 
 The first labels are supervised review material, not reinforcement learning and not an immediate model update. [The form roadmap](research/form-coaching-roadmap-2026-09.md) explains why genuine pose throughput, clear source pixels and guarded abstention matter more than a nominal 30 fps label.
+
+## Overnight progress and next experiment
+
+The public BoxingWeb archive is now local: 50 match videos and matching annotations. All 50 JSONs and one representative six-family video have been inspected. The audit found invalid intervals, uncertain label provenance in one round, and athlete overlap across the supplied splits; raw row counts are not clean training-label counts. See the [acquisition evidence](research/expert-reference-data.md). This gives us concrete diverse actions to inspect, but fight effectiveness is not a technique grade and the media terms remain unresolved.
+
+A bounded multi-person RGB+pose inspection run on the sample confirms why the existing single-person webcam extractor cannot simply ingest fight footage. The detector sees opponents, officials and spectators. The [inspection CLI](rgb-pose-inspection.md) retains source frame indices, decoded timestamps, raw scores, all person instances and hashes. Associate an annotation with a reviewed actor before creating training targets. The next useful representation comparison is a small reviewed RGB-plus-pose versus pose-only experiment, with actor identity, source timing, unknown intervals and source grouping fixed first.
+
+Two tempting local adjustments were rejected before activation: a time-based straight-punch sample requirement recovered no additional strict matches across 17 development views, and one-thread ONNX inference improved median saved-JPEG service time only 2.24%, below its predeclared 10% gate. No current recognition weights or service defaults changed. Detailed evidence and continuation priorities are in [the overnight ledger](overnight-progress.md).
+
+The user-facing correction flow now says **Correct punches**. Action labels save and resume without a guard answer; form observations are optional and explicitly provisional. This reduces labeling friction without making the user's execution a good-form reference.
 
 ## What the earlier rounds tested
 
