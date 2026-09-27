@@ -1,0 +1,14 @@
+Third-party notices for Corner
+
+Mediabunny 1.60.0
+Copyright (c) Vanilagy and contributors.
+Licensed under the Mozilla Public License, version 2.0.
+A copy of the license is included at /licenses/mediabunny-LICENSE.txt.
+Upstream project: https://github.com/Vanilagy/mediabunny
+The unmodified source corresponding to the bundled version is available at:
+https://registry.npmjs.org/mediabunny/-/mediabunny-1.60.0.tgz
+This dependency is bundled for local saved-video decoding. No third-party
+source modifications are included in Corner.
+
+Pose runtime and model provenance are documented at /models/README.md
+and in model-manifest.json in the project source.

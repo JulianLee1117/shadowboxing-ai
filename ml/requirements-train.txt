@@ -1,0 +1,3 @@
+# CPU reference environment used for the first bounded experiment.
+numpy==2.4.1
+torch==2.10.0

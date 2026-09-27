@@ -1,38 +1,34 @@
-# Next test: one fresh one-minute round
+# Next test: one natural 30-second round
 
-Use a new recording after the detector update. The earlier clips helped find bugs; recounting them cannot establish performance on new movement.
+Use a fresh recording after the update. There is no target detection count to satisfy; keep your normal stance and movement.
 
-## Setup
+## Record
 
-Open [Practice](http://127.0.0.1:5173), keep your usual **Lead hand**, and choose **1 minute**. Use the view with your chest partly facing the camera and both arms visible. Keep your head, hips and extended hands in frame throughout the round. Put the main light in front of you where practical, rather than a bright window behind you. Keep your normal stance and punch path.
+Open [Practice](http://127.0.0.1:5173), keep **30 seconds**, and choose your usual **Lead hand**. Leave **Practice focus** on free practice for this mixed test. Keep your head, hips and extended hands in view, with light in front of you where practical.
 
-Click **Enable camera**, then **Record round**. The eight-second countdown gives you time to step back. Recording starts automatically; you do not need to reach the laptop again.
+Click **Enable camera → Record round**, then step back during the eight-second countdown. No second click is needed.
 
-## Sequence
+- Start with a few clearly separated jabs and crosses at a comfortable pace.
+- Then try a few quicker **double jabs** and **jab–cross pairs**, resetting naturally between sequences. Add a double jab–cross if time allows.
+- Spend the last few seconds in guard or moving without punching.
 
-1. Raise your physical left hand, then your right, so their identity is clear in the video.
-2. Throw **3 slow jabs**, then **3 slow crosses**, with a brief reset between punches.
-3. Throw **3 jab–cross pairs** at a comfortable normal speed, resetting between pairs.
-4. Throw **3 jab–jab–cross sequences**, resetting between sequences but keeping the two jabs linked naturally.
-5. Spend the remaining time in guard, shifting position and relaxing your hands without throwing a punch.
-
-If you complete the sequence, the reference count is **12 jabs and 9 crosses**. Note any extra, omitted or interrupted action rather than assuming the intended count is the actual count. Faster means your comfortable normal speed; there is no need to alter your motion to satisfy the counter.
+This is a short sample, not a rigid script. Note extra, missed or interrupted actions rather than assuming the intended sequence happened. On a later day, repeat one similar round with the version held fixed; the earlier debugging footage cannot establish fresh-session performance.
 
 ## Review
 
-Let the round finish. Confirm **Saved on this device** and that the webcam indicator turns off. Watch the original video first, using **0.5×** speed or the frame buttons when useful. Then enable **Show tracking** to check whether L/R follows the correct physical hands, including when they overlap. Finally enable **Show detections** and check the separate punches, linked sequences and idle interval.
+Confirm the camera indicator turns off and **Saved on this device** appears. Watch the original video first; **0.5×** and frame stepping help inspect fast movement. Then use **Show tracking** to check whether L/R follows your physical hands, and **Show detections** to inspect singles and combinations. Uncertainty flags identify evidence to inspect, not proven mistakes or technique errors.
 
-For an older saved round, **Recheck detections** compares the current counting rules with its saved results. It uses existing tracking and cannot fix a pose error. **Use saved detections** restores the original results. Neither action overwrites the video or saved evidence.
+A separate local video analysis starts for the new completed recording. You can watch while it runs or choose **Cancel analysis**. **Original results stay selected**; when ready, use **Show video analysis** and **Show original** to compare. Different counts do not automatically mean better counts. Older saved recordings offer **Analyze recording** on demand. Motion-only rounds can use **Recheck detections** when available; that reuses saved poses.
 
 ## Report back
 
+A short note is enough:
+
 ```text
-Completed all sequences, or actual changes:
-Detected jabs / crosses:
-Which sequence missed or added punches:
-Did L/R stay on the correct physical hands?
-Any counts during the final idle interval?
-Video saved and camera off afterward?
+Any obvious missed or extra singles/sequences, and roughly when:
+Did tracking follow the correct hands during overlap or fast punches?
+Any counts during the idle ending?
+Video saved, camera off, and local analysis completed or canceled?
 ```
 
-Video and tracking remain local. Keep both **Evidence JSON** and **Export video** if making a backup. These are recognition checks; technique critique still needs separate coach-reviewed evidence.
+Keep **Evidence JSON** and **Export video** together for a backup; **Export video analysis** saves the separate derived report. Everything stays local. The four experimental combination labels and their limitations are described in [recognition events](recognition-events.md); technique critique still requires separate coach-reviewed evidence.

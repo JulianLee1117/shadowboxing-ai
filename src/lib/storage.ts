@@ -1,12 +1,30 @@
 import type { Session } from "./types";
+import type { RoundAnalysisReport } from "./roundAnalysis";
 
 const DB_NAME = "corner-local-v1";
 function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () =>
-      request.result.createObjectStore("sessions", { keyPath: "id" });
-    request.onsuccess = () => resolve(request.result);
+    let abandoned = false;
+    const request = indexedDB.open(DB_NAME, 2);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("sessions"))
+        db.createObjectStore("sessions", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("analyses"))
+        db.createObjectStore("analyses", { keyPath: "sourceSessionId" });
+    };
+    request.onsuccess = () => {
+      if (abandoned) {
+        request.result.close();
+        return;
+      }
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
+    request.onblocked = () => {
+      abandoned = true;
+      reject(new Error("Close other Corner tabs, then retry saving."));
+    };
     request.onerror = () =>
       reject(
         new Error(
@@ -47,7 +65,72 @@ export async function listSessions(): Promise<Session[]> {
   return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 export async function deleteSession(id: string) {
-  await transaction("readwrite", (store) => store.delete(id));
+  const db = await database();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(["sessions", "analyses"], "readwrite");
+    tx.objectStore("sessions").delete(id);
+    tx.objectStore("analyses").delete(id);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(new Error("Could not delete this round. Please retry."));
+    };
+  });
+}
+
+/** Derived video analysis is separate from original evidence and annotations. */
+export async function loadRoundAnalysis(
+  id: string,
+): Promise<RoundAnalysisReport | undefined> {
+  const db = await database();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("analyses", "readonly");
+    const request = tx.objectStore("analyses").get(id);
+    tx.oncomplete = () => {
+      db.close();
+      resolve(request.result);
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(new Error("Could not load this round’s analysis."));
+    };
+  });
+}
+
+export async function saveRoundAnalysis(
+  report: RoundAnalysisReport,
+): Promise<void> {
+  const db = await database();
+  return new Promise((resolve, reject) => {
+    // Check existence and write in one transaction: a completed background job
+    // must never resurrect analysis after its round was deleted elsewhere.
+    const tx = db.transaction(["sessions", "analyses"], "readwrite");
+    const exists = tx.objectStore("sessions").getKey(report.sourceSessionId);
+    let missing = false;
+    exists.onsuccess = () => {
+      if (exists.result === undefined) {
+        missing = true;
+        tx.abort();
+      } else tx.objectStore("analyses").put(report);
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(
+        new Error(
+          missing
+            ? "Save the original round before saving its analysis."
+            : "Analysis could not be saved. Export it before closing.",
+        ),
+      );
+    };
+  });
 }
 export function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);

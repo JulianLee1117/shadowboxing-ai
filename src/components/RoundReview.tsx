@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -11,6 +11,10 @@ import {
 import { PoseOverlay } from "./PoseOverlay";
 import { assessArmTracking, DETECTOR_VERSION } from "../lib/motion";
 import { recheckDetections, type DetectorRecheckReport } from "../lib/recheck";
+import { useRoundAnalysis } from "../hooks/useRoundAnalysis";
+import { groupCombinations } from "../lib/combinations";
+import { summarizeTrackingTrust } from "../lib/trackingTrust";
+import { combinationLabel, DRILLS, type DrillId } from "../lib/drills";
 import {
   deleteSession,
   downloadBlob,
@@ -22,6 +26,8 @@ import type { Session, SessionAnnotation } from "../lib/types";
 type Props = {
   sessions: Session[];
   selected: Session | null;
+  autoAnalyze: boolean;
+  onAutoAnalysisHandled: () => void;
   saveState: "saving" | "saved" | "error";
   onSelect: (session: Session) => void;
   onUpdate: (session: Session) => Promise<void>;
@@ -33,6 +39,8 @@ type Props = {
 export function RoundReview({
   sessions,
   selected,
+  autoAnalyze,
+  onAutoAnalysisHandled,
   saveState,
   onSelect,
   onUpdate,
@@ -46,6 +54,8 @@ export function RoundReview({
   const [overlay, setOverlay] = useState(false);
   const [showPredictions, setShowPredictions] = useState(false);
   const [recheck, setRecheck] = useState<DetectorRecheckReport | null>(null);
+  const analysis = useRoundAnalysis(selected);
+  const [useVideoAnalysis, setUseVideoAnalysis] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const offset = selected?.videoOffsetMs ?? 0;
@@ -59,7 +69,24 @@ export function RoundReview({
     recheck.detectorVersion === DETECTOR_VERSION
       ? recheck
       : null;
-  const detectionEvents = updated?.events ?? selected?.events ?? [];
+  const videoReport = useVideoAnalysis ? analysis.report : null;
+  const detectionEvents =
+    videoReport?.events ?? updated?.events ?? selected?.events ?? [];
+  const trackingFrames = videoReport?.frames ?? selected?.frames ?? [];
+  const savedUncertainty = useMemo(
+    () => summarizeTrackingTrust(selected?.frames ?? [], duration),
+    [selected?.frames, duration],
+  );
+  const uncertaintyIntervals =
+    videoReport?.uncertaintyIntervals ?? savedUncertainty;
+  const combinations = useMemo(
+    () =>
+      groupCombinations(detectionEvents, {
+        stance: selected?.stance ?? "orthodox",
+        uncertaintyIntervals,
+      }),
+    [detectionEvents, selected?.stance, uncertaintyIntervals],
+  );
   const jabCount = detectionEvents.filter(
     (event) => event.label === "jab",
   ).length;
@@ -67,6 +94,35 @@ export function RoundReview({
     (event) => event.label === "cross",
   ).length;
   useEffect(() => setRecheck(null), [sessionId, DETECTOR_VERSION]);
+  useEffect(() => setUseVideoAnalysis(false), [sessionId]);
+  useEffect(() => {
+    if (
+      !autoAnalyze ||
+      analysis.loadingSaved ||
+      analysis.running ||
+      saveState === "saving"
+    )
+      return;
+    onAutoAnalysisHandled();
+    if (!analysis.report) void analysis.start();
+  }, [
+    autoAnalyze,
+    analysis.loadingSaved,
+    analysis.running,
+    analysis.report,
+    analysis.start,
+    saveState,
+    onAutoAnalysisHandled,
+  ]);
+  useEffect(() => {
+    if (analysis.report) {
+      // Fresh decoding can change tracking and has not beaten saved-pose replay
+      // on the development set. Keep it a deliberate comparison, never silently
+      // replace original or rechecked counts when a background job finishes.
+      setUseVideoAnalysis(false);
+      setShowPredictions(true);
+    }
+  }, [analysis.report]);
   useEffect(() => {
     setTime(0);
     setPlaying(false);
@@ -161,10 +217,10 @@ export function RoundReview({
       else videoRef.current.pause();
     } else setPlaying((old) => !old);
   };
-  const nearest = selected?.frames.reduce(
+  const nearest = trackingFrames.reduce(
     (best, f) =>
       !best || Math.abs(f.t - time) < Math.abs(best.t - time) ? f : best,
-    selected.frames[0],
+    trackingFrames[0],
   );
   const frame = nearest && Math.abs(nearest.t - time) <= 100 ? nearest : null;
   const tracking = frame ? assessArmTracking(frame) : null;
@@ -194,6 +250,13 @@ export function RoundReview({
               ? `${formatTime(duration)} round · ${selected.stance === "orthodox" ? "Left" : "Right"} hand leads`
               : "Your rounds, saved on this device."}
           </p>
+          {selected &&
+            selected.drill !== "open" &&
+            selected.drill in DRILLS && (
+              <p className="round-focus">
+                Focus: {DRILLS[selected.drill as DrillId].label}
+              </p>
+            )}
         </div>
         <button className="button secondary" onClick={onPractice}>
           New round
@@ -244,6 +307,87 @@ export function RoundReview({
         </div>
       ) : (
         <>
+          {selected.video && selected.source !== "demo" && (
+            <div className="analysis-panel">
+              <div className="analysis-row">
+                <div>
+                  <strong>
+                    {analysis.running
+                      ? "Analyzing locally…"
+                      : analysis.report
+                        ? analysis.report.completeness.status === "partial"
+                          ? "Partial analysis available"
+                          : "Round analysis ready"
+                        : "Review this recording"}
+                  </strong>
+                  <p>
+                    {analysis.running
+                      ? "You can watch while analysis runs."
+                      : analysis.report
+                        ? analysis.report.completeness.status === "partial"
+                          ? analysis.report.completeness.reason
+                          : "An experimental second pass, available to compare."
+                        : "Analyze punches and combinations on this device."}
+                  </p>
+                </div>
+                <div className="analysis-actions">
+                  {analysis.running ? (
+                    <>
+                      <span className="analysis-progress-text">
+                        {Math.round((analysis.progress?.fraction ?? 0) * 100)}%
+                      </span>
+                      <button className="text-button" onClick={analysis.cancel}>
+                        Cancel analysis
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {analysis.report && (
+                        <button
+                          className="text-button"
+                          onClick={() => {
+                            if (useVideoAnalysis) setRecheck(null);
+                            setUseVideoAnalysis((old) => !old);
+                            setShowPredictions(true);
+                          }}
+                        >
+                          {useVideoAnalysis
+                            ? "Show original"
+                            : "Show video analysis"}
+                        </button>
+                      )}
+                      {!analysis.report && (
+                        <button
+                          className="button secondary"
+                          disabled={analysis.loadingSaved}
+                          onClick={() => void analysis.start()}
+                        >
+                          Analyze recording
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+              {analysis.running && (
+                <progress
+                  aria-label="Round analysis progress"
+                  max={1}
+                  value={analysis.progress?.fraction ?? 0}
+                />
+              )}
+              {analysis.error && (
+                <p className="analysis-error" role="alert">
+                  {analysis.error}
+                </p>
+              )}
+              {analysis.report && !analysis.saved && (
+                <p className="analysis-error">
+                  Analysis is available in this tab. Export it before closing.
+                </p>
+              )}
+            </div>
+          )}
           <div className="replay-stage" key={selected.id}>
             {videoUrl ? (
               <video
@@ -292,7 +436,7 @@ export function RoundReview({
               aria-label="Previous frame"
               onClick={() =>
                 stepTo(
-                  selected.frames.filter((f) => f.t < time - 1).at(-1)?.t ?? 0,
+                  trackingFrames.filter((f) => f.t < time - 1).at(-1)?.t ?? 0,
                 )
               }
             >
@@ -303,7 +447,7 @@ export function RoundReview({
               aria-label="Next frame"
               onClick={() =>
                 stepTo(
-                  selected.frames.find((f) => f.t > time + 1)?.t ?? duration,
+                  trackingFrames.find((f) => f.t > time + 1)?.t ?? duration,
                 )
               }
             >
@@ -381,27 +525,34 @@ export function RoundReview({
                   {crossCount} {crossCount === 1 ? "cross" : "crosses"}
                 </h2>
                 <span>
-                  {updated ? "Updated analysis · Experimental" : "Experimental"}
+                  {videoReport
+                    ? videoReport.completeness.status === "partial"
+                      ? "Partial video analysis · Experimental"
+                      : "Video analysis · Experimental"
+                    : updated
+                      ? "Updated analysis · Experimental"
+                      : "Original detections · Experimental"}
                 </span>
               </div>
               <p>
                 These counts can miss punches or count other movement. Compare
                 with the video.
               </p>
-              {(updated || selected.detectorVersion !== DETECTOR_VERSION) && (
-                <>
-                  <button
-                    className="text-button"
-                    onClick={() =>
-                      setRecheck(updated ? null : recheckDetections(selected))
-                    }
-                    disabled={!updated && selected.frames.length === 0}
-                  >
-                    {updated ? "Use saved detections" : "Recheck detections"}
-                  </button>
-                  <p>Uses saved tracking; does not rerun pose.</p>
-                </>
-              )}
+              {!videoReport &&
+                (updated || selected.detectorVersion !== DETECTOR_VERSION) && (
+                  <>
+                    <button
+                      className="text-button"
+                      onClick={() =>
+                        setRecheck(updated ? null : recheckDetections(selected))
+                      }
+                      disabled={!updated && selected.frames.length === 0}
+                    >
+                      {updated ? "Use saved detections" : "Recheck detections"}
+                    </button>
+                    <p>Uses saved tracking; does not rerun pose.</p>
+                  </>
+                )}
               <div className="event-timeline">
                 {detectionEvents.length ? (
                   detectionEvents.map((event) => (
@@ -422,6 +573,74 @@ export function RoundReview({
                   </span>
                 )}
               </div>
+              {combinations.length > 0 && (
+                <div className="combination-section">
+                  <h3>Combinations</h3>
+                  <p>
+                    Sequences of detected punches; this does not grade
+                    technique.
+                  </p>
+                  <div
+                    className="event-timeline"
+                    aria-label="Detected combinations"
+                  >
+                    {combinations.map((combo) => (
+                      <button
+                        key={combo.id}
+                        className="event-chip combo"
+                        onClick={() => stepTo(combo.startMs)}
+                      >
+                        <strong>{combinationLabel(combo.name)}</strong>
+                        <span>{(combo.startMs / 1000).toFixed(1)}s</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {!!uncertaintyIntervals.length && (
+                <details
+                  className="uncertainty-details"
+                  key={`uncertainty-${videoReport?.id ?? selected.id}`}
+                >
+                  <summary>
+                    Uncertain tracking · {uncertaintyIntervals.length} moments
+                  </summary>
+                  <p>
+                    Check the video at these moments. An uncertain track cannot
+                    establish a technique error.
+                  </p>
+                  <div className="event-timeline">
+                    {uncertaintyIntervals
+                      .slice(0, 12)
+                      .map((interval, index) => (
+                        <button
+                          key={index}
+                          className="event-chip uncertain-moment"
+                          onClick={() => stepTo(interval.startMs)}
+                        >
+                          <strong>
+                            {interval.hand === "both"
+                              ? "Both arms"
+                              : interval.hand === "left"
+                                ? "Left arm"
+                                : "Right arm"}
+                          </strong>
+                          <span>
+                            {(interval.startMs / 1000).toFixed(1)}–
+                            {(interval.endMs / 1000).toFixed(1)}s
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                  {uncertaintyIntervals.length > 12 && (
+                    <p>
+                      Showing the first 12 moments.
+                      {videoReport &&
+                        " The full timeline is included in the analysis export."}
+                    </p>
+                  )}
+                </details>
+              )}
             </div>
           )}
           {!selected.video && selected.source !== "demo" && (
@@ -440,6 +659,35 @@ export function RoundReview({
           <details className="options" key={`export-${selected.id}`}>
             <summary>Export & details</summary>
             <div className="export-buttons">
+              {analysis.report && (
+                <button
+                  className="button secondary"
+                  onClick={() =>
+                    downloadBlob(
+                      new Blob(
+                        [
+                          JSON.stringify({
+                            ...analysis.report,
+                            combinations: groupCombinations(
+                              analysis.report!.events,
+                              {
+                                stance: selected.stance,
+                                uncertaintyIntervals:
+                                  analysis.report!.uncertaintyIntervals,
+                              },
+                            ),
+                          }),
+                        ],
+                        { type: "application/json" },
+                      ),
+                      `corner-${selected.id}-video-analysis.json`,
+                    )
+                  }
+                >
+                  <Download size={15} />
+                  Export video analysis
+                </button>
+              )}
               <button
                 className="button secondary"
                 onClick={() => exportSession(selected)}
@@ -485,12 +733,41 @@ export function RoundReview({
                 Delete this round
               </button>
             </div>
+            {analysis.report && (
+              <div className="analysis-details">
+                <p>
+                  Video analysis uses its own tracking. Counts can differ from
+                  capture and may still be wrong.
+                </p>
+                <p>
+                  Video pass: {analysis.report.frames.length} frames ·{" "}
+                  {(analysis.report.cadence.processingMs / 1000).toFixed(1)}s{" "}
+                  processing · {analysis.report.model} /{" "}
+                  {analysis.report.delegate}. Detector:{" "}
+                  {analysis.report.detectorVersion}.
+                </p>
+                {analysis.report.completeness.status === "partial" && (
+                  <p>Partial analysis: {analysis.report.completeness.reason}</p>
+                )}
+                {analysis.report.warnings.map((warning) => (
+                  <p key={warning}>{warning}</p>
+                ))}
+                <button
+                  className="text-button"
+                  disabled={analysis.running}
+                  onClick={() => void analysis.start()}
+                >
+                  Analyze again
+                </button>
+              </div>
+            )}
             {updated && (
               <p>
                 Updated analysis exports detections only. Evidence JSON keeps
                 the original saved results.
               </p>
             )}
+            <p>Original capture details</p>
             <dl className="technical-details">
               <div>
                 <dt>Model</dt>

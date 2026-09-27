@@ -740,7 +740,7 @@ test("retained-video replay bounds native seeking and hides pose samples across 
         annotationsComplete: false,
       };
       await new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("corner-local-v1", 1);
+        const request = indexedDB.open("corner-local-v1", 2);
         request.onupgradeneeded = () =>
           request.result.createObjectStore("sessions", { keyPath: "id" });
         request.onerror = () => reject(request.error);
@@ -884,7 +884,7 @@ test("motion-only replay supports half speed and frame stepping pauses playback"
         annotationsComplete: false,
       };
       await new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("corner-local-v1", 1);
+        const request = indexedDB.open("corner-local-v1", 2);
         request.onupgradeneeded = () =>
           request.result.createObjectStore("sessions", { keyPath: "id" });
         request.onerror = () => reject(request.error);
@@ -970,7 +970,7 @@ test("detection recheck is temporary and exports separately from original eviden
         detectorVersion: "saved-older-detector",
       };
       await new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("corner-local-v1", 1);
+        const request = indexedDB.open("corner-local-v1", 2);
         request.onupgradeneeded = () =>
           request.result.createObjectStore("sessions", { keyPath: "id" });
         request.onerror = () => reject(request.error);

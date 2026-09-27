@@ -112,6 +112,18 @@ export class VisionRunner {
   }
 
   async detect(video: HTMLVideoElement, t: number): Promise<PoseFrame> {
+    if (
+      video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+      !video.videoWidth ||
+      !video.videoHeight
+    ) {
+      throw new Error("Video has no decoded frame available yet.");
+    }
+    return this.detectImage(video, t);
+  }
+
+  /** Decoded offline pixels use the same worker and ownership rules as live video. */
+  async detectImage(source: ImageBitmapSource, t: number): Promise<PoseFrame> {
     if (this.disposed) throw new Error("Pose runner has been disposed.");
     if (!this.initialized || !this.worker)
       throw new Error("Initialize the pose runner before detecting frames.");
@@ -123,18 +135,13 @@ export class VisionRunner {
       throw new Error(
         "Frame timestamp must be finite, source-relative milliseconds.",
       );
-    if (
-      video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
-      !video.videoWidth ||
-      !video.videoHeight
-    ) {
-      throw new Error("Video has no decoded frame available yet.");
-    }
     this.detecting = true;
     let bitmap: ImageBitmap | undefined;
     try {
       // CSS preview mirroring does not affect this raw pixel capture.
-      bitmap = await createImageBitmap(video);
+      bitmap = await createImageBitmap(source);
+      if (!bitmap.width || !bitmap.height)
+        throw new Error("Image has no decoded pixels available.");
       if (this.disposed || !this.worker)
         throw new Error("Pose runner stopped while capturing the frame.");
       const reply = await this.request(

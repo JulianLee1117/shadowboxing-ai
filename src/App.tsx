@@ -5,6 +5,7 @@ import { PoseOverlay } from "./components/PoseOverlay";
 import { RoundReview } from "./components/RoundReview";
 import { assessArmTracking } from "./lib/motion";
 import { ReadinessGate } from "./lib/readiness";
+import { DRILLS, type DrillId } from "./lib/drills";
 import { formatTime, listSessions, saveSession } from "./lib/storage";
 import type { ModelVariant, Session, Stance } from "./lib/types";
 
@@ -12,11 +13,13 @@ function App() {
   const [view, setView] = useState<"practice" | "review">("practice");
   const [stance, setStance] = useState<Stance>("orthodox");
   const [duration, setDuration] = useState(30);
+  const [drill, setDrill] = useState<DrillId>("open");
   const [model, setModel] = useState<ModelVariant>("full");
   const [overlay, setOverlay] = useState(true);
   const [sound, setSound] = useState(true);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<Session | null>(null);
+  const [autoAnalyzeId, setAutoAnalyzeId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saveStates, setSaveStates] = useState<
     Record<string, "saving" | "saved" | "error">
@@ -54,6 +57,9 @@ function App() {
         ...old.filter((s) => s.id !== session.id),
       ]);
       setSelected(session);
+      setAutoAnalyzeId(
+        session.video && session.source !== "demo" ? session.id : null,
+      );
       setView("review");
       void persist(session);
     },
@@ -103,14 +109,14 @@ function App() {
     beep(true);
     await studio.beginRound({
       stance,
-      drill: "open",
+      drill,
       durationSeconds: duration,
       record: true,
       // Stance is explicitly selected. Per-arm observability gates detections,
       // never video recording; this is not a technique calibration.
       calibrated: true,
     });
-  }, [beep, studio.beginRound, stance, duration]);
+  }, [beep, studio.beginRound, stance, duration, drill]);
   const latestBegin = useRef(begin);
   latestBegin.current = begin;
   useEffect(() => {
@@ -239,7 +245,7 @@ function App() {
           <div className="page-heading">
             <div>
               <h1>Practice</h1>
-              <p>Make space. Take your stance. Start a round.</p>
+              <p>{DRILLS[drill].prompt}</p>
             </div>
             <span className="local-badge">
               <span /> On your device
@@ -429,6 +435,21 @@ function App() {
           <details className="options" open={active ? false : undefined}>
             <summary>More options</summary>
             <div className="options-content">
+              <label>
+                Practice focus
+                <select
+                  aria-label="Practice focus"
+                  value={drill}
+                  disabled={active || studio.status === "loading"}
+                  onChange={(e) => setDrill(e.target.value as DrillId)}
+                >
+                  {Object.entries(DRILLS).map(([id, value]) => (
+                    <option value={id} key={id}>
+                      {value.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="checkbox">
                 <input
                   type="checkbox"
@@ -499,6 +520,8 @@ function App() {
           <RoundReview
             sessions={sessions}
             selected={selected}
+            autoAnalyze={selected?.id === autoAnalyzeId}
+            onAutoAnalysisHandled={() => setAutoAnalyzeId(null)}
             saveState={
               selected ? (saveStates[selected.id] ?? "saved") : "saved"
             }

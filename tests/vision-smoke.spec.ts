@@ -390,7 +390,7 @@ async function savedSessionSummaries(page: Page) {
     // Read persisted browser evidence directly so this UI lifecycle test also
     // works against compiled production assets without a Vite source endpoint.
     const sessions = await new Promise<Session[]>((resolve, reject) => {
-      const open = indexedDB.open("corner-local-v1", 1);
+      const open = indexedDB.open("corner-local-v1", 2);
       open.onerror = () =>
         reject(new Error("Could not read the session database."));
       open.onblocked = () =>

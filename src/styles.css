@@ -631,6 +631,86 @@ input[type="range"] {
 .detections {
   margin-bottom: 24px;
 }
+.analysis-panel {
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f0f3ec;
+}
+.analysis-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.analysis-row strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+.analysis-panel p {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 5px 0 0;
+}
+.analysis-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.analysis-progress-text {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.analysis-panel progress {
+  display: block;
+  width: 100%;
+  height: 5px;
+  margin-top: 14px;
+  border: 0;
+  accent-color: var(--green);
+}
+.analysis-panel .analysis-error {
+  color: #945243;
+  margin-top: 10px;
+}
+.analysis-details {
+  margin: 0 0 18px;
+}
+.analysis-details p {
+  margin-bottom: 0;
+}
+.combination-section {
+  padding-top: 20px;
+}
+.combination-section h3 {
+  font-size: 13px;
+  font-weight: 550;
+  margin: 0;
+}
+.event-chip.combo {
+  background: #f0ede5;
+  border-color: #dfd9cb;
+}
+.uncertainty-details {
+  margin-top: 20px;
+  font-size: 12px;
+  color: #7f684d;
+}
+.uncertainty-details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.event-chip.uncertain-moment {
+  background: #f4efe6;
+  border-color: #e7dac5;
+}
+.page-heading .round-focus {
+  margin-top: 7px;
+  color: var(--green);
+}
 .detection-heading {
   display: flex;
   flex-wrap: wrap;
@@ -803,6 +883,12 @@ footer {
   }
 }
 @media (max-width: 700px) {
+  .analysis-row {
+    flex-wrap: wrap;
+  }
+  .analysis-actions {
+    flex-wrap: wrap;
+  }
   .app-shell {
     padding: 0 20px;
   }

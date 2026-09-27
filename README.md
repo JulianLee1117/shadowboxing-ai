@@ -1,8 +1,8 @@
 # Corner — Shadowboxing AI
 
-A local shadowboxing practice app for a laptop webcam: record a short round, replay the original video, and compare it with experimental jab/cross detections.
+A local laptop-camera practice app: record a short round, replay your video, and inspect experimental straight-punch and combination detections.
 
-**Status: research prototype, September 26, 2026.** MediaPipe pose inference runs locally. Counting uses projected-motion heuristics; accurate recognition and technique coaching have not been validated. No technique grades or corrective judgments are enabled.
+**Research prototype, September 26, 2026.** Pose inference and saved-video analysis run on your device. Recognition and technique coaching have not been validated. No technique grades or corrective judgments are enabled.
 
 ## Run locally
 
@@ -14,44 +14,35 @@ npm run models:setup -- --all
 npm run dev
 ```
 
-Open [the local app](http://127.0.0.1:5173). Use the same browser and address to retain access to saved rounds: `localhost` and `127.0.0.1` have separate browser storage.
+Open [the local app](http://127.0.0.1:5173). Keep the same browser and address to access saved rounds; `localhost` and `127.0.0.1` have separate storage.
 
-Models and runtime files download during setup, then are served from your device. Setup without `--all` installs Full only. Artifact URLs and SHA-256 hashes are recorded in [the model manifest](model-manifest.json); weights and copied WASM files stay out of Git. Desktop Chromium is the current target. Safari and mobile-browser inference have not been validated.
+Setup downloads model/runtime assets, which are then served locally. Without `--all`, it installs Full only. URLs and hashes are recorded in [the model manifest](model-manifest.json). Desktop Chromium is the current target; saved-video analysis requires supported WebCodecs decoding. Safari and mobile inference have not been validated. See [third-party notices](public/third-party-notices.txt) and [model notes](public/models/README.md).
 
-## Record your first round
+## Practice and review
 
-Practice defaults to **30 seconds** of free practice with the left hand leading. See [the short first-test checklist](docs/first-user-test.md).
+1. Keep the default **30 seconds**, choose **Lead hand**, and click **Enable camera**. Frame your head, hips and extended hands. **More options → Practice focus** offers free practice, jab–cross, double jab and double jab–cross prompts.
+2. Click **Record round**, then step back during the **8-second countdown**. Recording starts automatically, including when tracking is uncertain. No second click is needed.
+3. Let the timer finish or click **Stop & save**. Review opens and the camera is released. Camera rounds save video and tracking locally; no microphone is requested.
+4. Watch the video first. Use **0.5×**, frame stepping, **Show tracking** and **Show detections** to inspect individual movements. Predicted L/R labels and visibility scores do not prove hand identity.
+5. A newly completed round with video starts a separate local analysis. You can keep watching, follow progress, or **Cancel analysis**. **Original results remain the default**; use **Show video analysis** / **Show original** to compare. A fresh pass can improve or worsen particular detections.
 
-1. Choose **Lead hand**, then **Enable camera**. Frame your head through hips, leaving room for both arms to extend.
-2. Click **Record round** near the laptop, then step back. Recording starts automatically after **8 seconds**, even if tracking is uncertain. No second click or setup checkbox is required.
-3. Practice normally. **L / R** are predicted anatomical hand labels; check they follow your physical hands. Amber means uncertain tracking. Visibility alone does not verify hand identity or technique.
-4. Let the timer finish or click **Stop & save**. The app opens **Review** and releases the camera. Camera rounds save video and tracking locally; no microphone is requested.
-5. Watch the original video first. Use **0.5×** speed and frame stepping to inspect movement. **Show tracking** and **Show detections** expose the model separately. Labels and **Export & details** are collapsed below replay.
+Older recordings offer **Analyze recording** on demand. Compatible saved reports load from local storage. Analysis uses native decoded video frames and timestamps, processes them sequentially with a fresh Full worker, and preserves the original video, tracking, detections and reference labels. It has limits of 185 seconds, 5,550 processed frames, 250 MB, 4K pixels and four minutes of processing; ordinary source rates through 60 fps are preserved, with higher rates sampled. A reached duration/frame/time limit produces an explicitly partial report when usable evidence exists.
 
-**More options** contains tracking visibility, countdown sound, Full/Lite/Heavy models, **Open video**, and **Try demo**. Models can be changed while the source is off. Imported clips retain their original video locally; **Analyze clip** starts their analysis. The demo is synthetic and excluded from real accuracy reports.
+Review groups observed punches into **jab–cross (1-2)**, **double jab (1-1)**, **double jab–cross (1-1-2)** and **jab–cross–jab (1-2-1)**. These are experimental sequences, not form grades or proof that the requested drill was performed. Uncertain tracking can block a combination while leaving the original punch events intact. See [recognition events and tracking diagnostics](docs/recognition-events.md).
 
-Older motion-only rounds remain available in **Saved rounds**. Updates preserve their original detections. **Recheck detections** applies new counting rules to their saved tracking in memory; **Use saved detections** restores the original view. Updated analysis exports separately and does not rerun the pose model. A skeleton without source video cannot independently validate pose or punch accuracy. If the browser reports that recording is unavailable, that round may contain tracking only.
+**More options** also contains Full/Lite/Heavy selection, tracking display, countdown sound, **Open video** and **Try demo**. Imported clips retain their original file; **Analyze clip** starts their first pass. The demo is synthetic and excluded from real accuracy reports. Older motion-only rounds remain readable. **Recheck detections**, when offered in original mode, applies current counting rules to saved poses without rerunning the model; **Use saved detections** restores their original events.
 
-## Current recognition limitation
+See [the short first-test guide](docs/first-user-test.md). Export **Evidence JSON** and **Export video** for a backup; derived video-analysis reports have their own export. Browser storage is not a backup, and an unfinished round can be lost on reload. Save failures are shown so an in-memory result can still be exported.
 
-Independent arm gating prevents an uncertain guarding hand from resetting the opposite arm's detector. Cross recognition remains unvalidated: an incorrectly tracked wrist or a foreshortened view can still fail the projected-motion checks. A high visibility score does not guarantee the correct hand was located.
+## What works, and what remains experimental
 
-The detector checks the outward path separately from recovery, accepts a brief observed peak only with supporting neighboring frames, and acquires repeat starts from confirmed returns or observed flexed reversals. A bounded path check tolerates one isolated tracking detour without altering raw landmarks or peak evidence. Existing labeled rounds now support repeatable regression comparisons; fresh sessions are needed to evaluate a frozen version. See [the implementation ledger](docs/implementation-status.md) and [next iteration decisions](docs/iteration-plan.md).
+The app has local worker inference with CPU fallback, recording/replay, separate cached video analysis, immutable detection rechecks, combination grouping, uncertainty flags, reference labeling and exports. Full remains the live default. The worker restricts external requests, and development/preview servers apply a restrictive CSP. No cloud review, analytics, API key or voice coaching is connected; footage is not uploaded.
 
-## Implemented
+Straight-punch detection uses projected motion and observed recovery. Independent arm gating, supported brief peaks, observed flexed reversals and a bounded path-detour check address specific failure modes. Foreshortening, occlusion and a confidently misplaced wrist can still defeat recognition. Tracking diagnostics flag some inconsistencies but never verify identity, swap hands or repair coordinates. Hooks and uppercuts can be labeled manually but are not automatically recognized.
 
-- Local MediaPipe Full/Lite/Heavy inference in a worker, one in-flight frame, timeouts and CPU fallback.
-- Same-origin assets, a worker network boundary blocking external SDK requests, and restrictive development/preview CSP headers.
-- An eight-second recording countdown, independent arm visibility checks, anatomical hand/lead mapping and experimental straight-punch events.
-- Local video and pose storage, automatic review, half-speed playback/stepping, versioned detection rechecks, reference labels, JSON/video export and per-round deletion.
-- Capture settings, actual delegate, timestamps, timing telemetry, model provenance and detector version in new exports.
-- Local replay and batch comparison tools, labeled event evaluation and separate pose diagnostics. Optional RTMPose/RTMW extraction has run on target footage and retains explicit model/preprocessing/runtime provenance; Full remains the live default.
+Local pose challengers have been tested without establishing a replacement for Full. A runnable [temporal training experiment](docs/temporal-training.md) also increased false events on the small development corpus; its weights are **not enabled in the app**. No model comparison, training experiment or second video pass is claimed as validated accuracy, generalization, or coaching benefit. Private footage and numeric experiment reports stay out of Git. See [implementation status](docs/implementation-status.md) and [next decisions](docs/iteration-plan.md).
 
-Hooks, uppercuts and other actions can be labeled manually but are not recognized by the live baseline. Front-facing punches and self-occlusion can defeat projected geometry. Heuristic scores are not calibrated confidence, and returning toward a starting position is not proof of correct guard recovery.
-
-Cloud review is not connected and no API key is required. The app does not upload footage. Browser storage is not a backup: export video and JSON you want to preserve. Closing or reloading during an unfinished round can lose it. No sustained 20-minute acceptance test, held-out recognition accuracy or coach-reviewed efficacy result is claimed.
-
-## Verify
+## Verify and evaluate
 
 ```sh
 npm run check
@@ -61,9 +52,7 @@ npm run test:e2e
 npm audit
 ```
 
-Automated browser tests use generated streams and stub physical camera requests. They exercise actual local inference and software behavior; synthetic timings are not boxing-performance measurements. Local model assets are required. For a production build, run `npm run build` and `npm run preview`; configure equivalent CSP/permissions headers when serving elsewhere.
-
-## Inspect exported rounds
+Browser tests use generated streams and stub physical-camera requests. They verify actual local inference and software behavior, not boxing accuracy. Optional temporal tests need their separate dependencies. Local assets are required. To inspect a production build, run `npm run build` and `npm run preview`; equivalent security headers are needed when serving elsewhere.
 
 ```sh
 python3 -m ml.diagnose /path/to/session.json --output data/diagnosis.json
@@ -72,19 +61,16 @@ npm run benchmark -- /path/to/day1-labeled.json /path/to/day2-labeled.json \
   --output-dir data/pilot/runs/new-experiment
 ```
 
-`diagnose` reports per-arm visibility, projected geometry and timing, without claiming accuracy. Add `--include-timeline --window-ms 1000` for detailed tracking inspection. `evaluate` requires complete reference labels, or an explicit `--annotations-complete` assertion, for recognition metrics; otherwise it reports capture quality only. Both reject synthetic sessions unless `--allow-synthetic` is explicitly selected for software checks. See [benchmarking](docs/benchmarking.md) for matching rules and the optional RTM path.
-
-`benchmark` requires complete independent labels, preserves input sessions, refuses an existing output directory, and compares saved/current detections on unchanged poses. It reports recovered and lost reference actions as well as total matches and unmatched detections. This is a development regression check, not held-out accuracy or coaching validation.
+`diagnose` reports tracking and timing. `evaluate` reports recognition metrics only with complete reference labels or an explicit completeness assertion. `benchmark` preserves inputs and compares saved/current detections on unchanged poses, including recovered/lost actions and false detections. These are development tools; see [benchmarking](docs/benchmarking.md).
 
 ## Project notes
 
 - [Product and technical plan](docs/project-plan.md)
-- [First sprint and completion ledger](docs/first-sprint.md)
-- [Implementation and validation status](docs/implementation-status.md)
+- [First sprint](docs/first-sprint.md)
 - [Pose research](docs/research/pose-models.md)
-- [Optimization sources and priorities](docs/research/optimization-update.md)
-- [Data and evaluation research](docs/research/data-and-evaluation.md)
+- [Optimization sources](docs/research/optimization-update.md)
+- [Data and evaluation](docs/research/data-and-evaluation.md)
 - [Coaching validity](docs/research/coaching-validity.md)
-- [Future video review layer](docs/research/video-review.md)
+- [Future video review](docs/research/video-review.md)
 
-Research plans describe intended capabilities beyond this prototype. Raw footage, personal exports, datasets, credentials, model binaries and test output stay out of Git. Third-party resources retain their own licenses; see [model notes](public/models/README.md).
+Research plans include capabilities beyond the prototype. Recordings, personal exports, datasets, credentials, model binaries and test output stay out of Git. No sustained 20-minute acceptance result is claimed.
