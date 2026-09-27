@@ -663,6 +663,7 @@ export function RoundReview({
                 with the video.
               </p>
               {!videoReport &&
+                !selected.frames.some((frame) => frame.recognition) &&
                 (updated || selected.detectorVersion !== DETECTOR_VERSION) && (
                   <>
                     <button
@@ -950,6 +951,15 @@ export function RoundReview({
                   Updated analysis exports detections only. Evidence JSON keeps
                   the original saved results.
                 </p>
+              )}
+              {selected.video && selected.source !== "demo" && (
+                <button
+                  className="text-button"
+                  disabled={analysis.running || analysis.loadingSaved}
+                  onClick={() => void analysis.start("rtmpose-m")}
+                >
+                  Review with Precision · this Mac
+                </button>
               )}
               <p>Original capture details</p>
               <dl className="technical-details">

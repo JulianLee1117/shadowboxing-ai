@@ -53,7 +53,9 @@ export function replayEvidence(session, options) {
     );
     requireValue(
       modelId === modelId.trim() &&
-        !["full", "heavy", "lite", "synthetic"].includes(modelId.toLowerCase()),
+        !["full", "heavy", "lite", "synthetic", "rtmpose-m", "rtmw-l"].includes(
+          modelId.toLowerCase(),
+        ),
       "Use a distinct research model identifier; do not relabel external poses as a browser model.",
     );
     requireValue(
@@ -87,6 +89,10 @@ export function replayEvidence(session, options) {
   // silently disappear merely because the filter would place them out of range.
   let sourcePrevious = -Infinity;
   for (const frame of poses?.frames ?? session.frames) {
+    requireValue(
+      !frame?.recognition,
+      "Saved learned decisions cannot be recomputed from tracking alone. Rerun video with the fingerprinted local recognizer.",
+    );
     requireValue(
       frame && finite(frame.t) && frame.t >= 0 && frame.t > sourcePrevious,
       "Source frame times must be finite, nonnegative and strictly increasing.",

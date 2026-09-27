@@ -8,6 +8,14 @@ const privacyHeaders = {
   "Permissions-Policy": "camera=(self), microphone=()",
 };
 
+const localPoseProxy = {
+  "/local-pose": {
+    target: "http://127.0.0.1:8765",
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/local-pose/, ""),
+  },
+};
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -15,8 +23,15 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     headers: privacyHeaders,
+    proxy: localPoseProxy,
   },
-  preview: { host: "127.0.0.1", headers: privacyHeaders },
+  preview: {
+    host: "127.0.0.1",
+    port: 5173,
+    strictPort: true,
+    headers: privacyHeaders,
+    proxy: localPoseProxy,
+  },
   test: { include: ["src/**/*.test.ts"], environment: "node" },
   worker: { format: "es" },
 });

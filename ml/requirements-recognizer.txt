@@ -1,0 +1,5 @@
+# Optional personal recognizer only; never installed or activated automatically.
+# Checkpoints must be provided locally with their frozen compatibility manifest.
+-r requirements-extract.txt
+torch==2.10.0
+scipy==1.18.1

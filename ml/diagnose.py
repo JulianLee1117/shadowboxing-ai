@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from .evaluate import JOINTS, finite, percentile, validate_session
+from .evaluate import JOINTS, finite, native_estimator, percentile, validate_session
 
 ARMS = {"left": (11, 13, 15), "right": (12, 14, 16)}
 TORSO = (11, 12, 23, 24)
@@ -31,12 +31,21 @@ def point_at(points: list, index: int) -> dict:
     return points[index] if isinstance(points, list) and index < len(points) and isinstance(points[index], dict) else {}
 
 
-def point_issues(point: dict, visibility: float, presence: float) -> list[str]:
+def point_issues(point: dict, visibility: float, presence: float,
+                 estimator: dict | None = None) -> list[str]:
     issues = []
     if not all(finite(point.get(key)) for key in ("x", "y")):
         issues.append("missing_or_nonfinite_position")
     elif not all(0 <= point[key] <= 1 for key in ("x", "y")):
         issues.append("outside_image")
+    if estimator is not None:
+        if not native_estimator(estimator):
+            issues.append("invalid_native_score_policy")
+        if not finite(point.get("score")):
+            issues.append("missing_or_invalid_native_score")
+        elif native_estimator(estimator) and point["score"] < estimator["minimumScore"]:
+            issues.append("low_native_score")
+        return issues
     if not finite(point.get("visibility")):
         issues.append("missing_visibility")
     elif point["visibility"] < visibility:
@@ -56,7 +65,8 @@ def angle(a: tuple, b: tuple, c: tuple) -> float | None:
 
 def frame_observation(frame: dict, visibility: float, presence: float) -> dict:
     points = frame["landmarks"]
-    issues = {NAMES[i]: point_issues(point_at(points, i), visibility, presence) for i in LEGACY_REQUIRED}
+    issues = {NAMES[i]: point_issues(point_at(points, i), visibility, presence,
+                                    frame.get("estimator")) for i in LEGACY_REQUIRED}
     width, height = frame.get("width"), frame.get("height")
     dimensions_ok = finite(width) and finite(height) and width > 0 and height > 0
 
@@ -102,7 +112,8 @@ def frame_observation(frame: dict, visibility: float, presence: float) -> dict:
                       "issues": list(dict.fromkeys(shared_issues + arm_issues)),
                       **geometry, "wristSpeedTorsoPerSecond": None}
     legacy_gate = not any(issues.values()) and all(a["passesTrackingGate"] for a in arms.values())
-    return {"t": frame["t"], "jointIssues": issues, "torsoScaleImageHeight": scale,
+    return {"t": frame["t"], "estimator": frame.get("estimator"),
+            "jointIssues": issues, "torsoScaleImageHeight": scale,
             "sharedIssues": shared_issues, "legacyAllNineGate": legacy_gate, "arms": arms}
 
 
@@ -133,10 +144,14 @@ def summarize(rows: list[dict], raw_frames: list[dict]) -> dict:
         name = NAMES[index]
         failures = Counter(issue for row in rows for issue in row["jointIssues"][name])
         summary["joints"][name] = {
-            "visibility": stats([p["visibility"] for f in raw_frames
+            "visibility": stats([p["visibility"] for f in raw_frames if "estimator" not in f
                                  if finite((p := point_at(f["landmarks"], index)).get("visibility"))]),
             "coverage": fraction(sum(not r["jointIssues"][name] for r in rows)),
             "failureCounts": dict(failures)}
+        if any("estimator" in frame for frame in raw_frames):
+            summary["joints"][name]["nativeScore"] = stats(
+                [p["score"] for f in raw_frames if "estimator" in f
+                 if finite((p := point_at(f["landmarks"], index)).get("score"))])
     for hand in ARMS:
         arm_rows = [row["arms"][hand] for row in rows]
         usable = [arm for arm in arm_rows if arm["passesTrackingGate"]]
@@ -181,8 +196,9 @@ def diagnose(session: dict, *, visibility: float = .65, presence: float = .5,
         windows.append({"startMs": bucket * window_ms, "endMs": min((bucket + 1) * window_ms, session["durationMs"]),
                         **summarize([rows[i] for i in indices], [frames[i] for i in indices])})
     report = {
-        "reportType": "pose_observation_diagnostics", "reportVersion": "1.0",
+        "reportType": "pose_observation_diagnostics", "reportVersion": "1.1",
         "sessionId": session["id"], "source": session["source"], "model": session["model"],
+        "modelManifest": session.get("modelManifest"),
         "synthetic": session["source"] == "demo" or session["model"] == "synthetic",
         "durationMs": session["durationMs"], "savedEvents": session["events"],
         "interpretation": [
@@ -190,8 +206,13 @@ def diagnose(session: dict, *, visibility: float = .65, presence: float = .5,
             "2D angles/reach are projected model observations, not anatomical measurements or technique scores.",
             "World landmarks are model estimates, not independent ground truth; they are not used to accept punches here.",
             "Legacy gate reproduces acquisition geometry/visibility rules only, not calibration, temporal state, or event decisions.",
+            "Native estimator frames use their explicit score policy, not MediaPipe visibility/presence thresholds. Native scores are uncalibrated and do not verify anatomical identity.",
+            "The legacyAllNineGate field keeps the old nine-joint set for comparison, applying each frame's estimator policy; it is not the current event detector.",
             "High-angle runs are observed samples, not punch events. Video/reference labels are needed to identify actual actions."],
         "settings": {"visibility": visibility, "presence": presence, "windowMs": window_ms,
+                     "mediaPipeThresholdScope": "Frames without an explicit native estimator only",
+                     "nativeEstimatorPolicies": [json.loads(p) for p in sorted({
+                         json.dumps(f["estimator"], sort_keys=True) for f in frames if "estimator" in f})],
                      "maximumGapMs": maximum_gap_ms, "minimumTorsoImageHeight": .08,
                      "minimumArmSegmentImageHeight": .01, "highElbowAngleDegrees": 145},
         "timing": {"frameGapMs": stats(gaps), "gapsAboveLimit": sum(g > maximum_gap_ms for g in gaps),

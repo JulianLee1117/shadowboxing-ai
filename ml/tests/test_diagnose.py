@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from ml.diagnose import diagnose, frame_observation, main
+from ml.diagnose import diagnose, frame_observation, main, point_issues
 
 
 def frame(t=0):
@@ -24,7 +24,75 @@ def session(frames=None):
             "events": [], "annotations": []}
 
 
+def native_session(times=(0,)):
+    policy = {"id": "rtmpose-m", "scoreType": "simcc", "minimumScore": .55}
+    frames = [frame(t) for t in times]
+    for item in frames:
+        item["estimator"] = dict(policy)
+        item["landmarks"] = [{"x": p["x"], "y": p["y"], "score": .6}
+                             for p in item["landmarks"]]
+    result = session(frames)
+    result["model"] = "rtmpose-m"
+    result["modelManifest"] = {"id": "rtmpose-m", "estimator": policy,
+                               "modelManifest": {key: {"sha256": "a" * 64}
+                                                 for key in ("detector", "pose")}}
+    return result
+
+
 class DiagnosticTests(unittest.TestCase):
+    def test_native_scores_use_explicit_policy_and_separate_statistics(self):
+        source = native_session()
+        # Conflicting fields cannot turn a native score into MP visibility.
+        source["frames"][0]["landmarks"][15].update(visibility=0, presence=0)
+        original = copy.deepcopy(source)
+        report = diagnose(source, visibility=.99, presence=.99, include_timeline=True)
+        wrist = report["summary"]["joints"]["leftWrist"]
+        self.assertEqual(wrist["coverage"], 1)
+        self.assertEqual(wrist["visibility"]["count"], 0)
+        self.assertEqual(wrist["nativeScore"]["p50"], .6)
+        self.assertEqual(report["summary"]["arms"]["left"]["trackingGateCoverage"], 1)
+        self.assertEqual(report["settings"]["nativeEstimatorPolicies"],
+                         [source["modelManifest"]["estimator"]])
+        self.assertEqual(source, original)
+
+    def test_native_low_score_blocks_only_its_arm_despite_high_visibility(self):
+        source = native_session()
+        source["frames"][0]["landmarks"][15].update(score=.54, visibility=1)
+        summary = diagnose(source)["summary"]
+        self.assertEqual(summary["joints"]["leftWrist"]["failureCounts"], {"low_native_score": 1})
+        self.assertEqual(summary["arms"]["left"]["trackingGateCoverage"], 0)
+        self.assertEqual(summary["arms"]["right"]["trackingGateCoverage"], 1)
+
+    def test_missing_native_score_never_falls_back_to_visibility(self):
+        source = native_session()
+        point = source["frames"][0]["landmarks"][15]
+        del point["score"]
+        point["visibility"] = 1
+        failures = diagnose(source)["summary"]["joints"]["leftWrist"]["failureCounts"]
+        self.assertEqual(failures, {"missing_or_invalid_native_score": 1})
+
+    def test_native_invalid_policy_and_outside_coordinates_are_not_accepted(self):
+        source = native_session()
+        point = source["frames"][0]["landmarks"][15]
+        point.update(x=1.01, score=1)
+        self.assertEqual(diagnose(source)["summary"]["joints"]["leftWrist"]["failureCounts"],
+                         {"outside_image": 1})
+        policy = dict(source["frames"][0]["estimator"], minimumScore=0)
+        self.assertIn("invalid_native_score_policy", point_issues(point, .65, .5, policy))
+        source["frames"][0]["estimator"] = policy
+        with self.assertRaises(ValueError):
+            diagnose(source)
+
+    def test_native_speed_never_bridges_failed_observations(self):
+        source = native_session((0, 33, 66, 100))
+        for i, item in enumerate(source["frames"]):
+            item["landmarks"][16]["x"] += i * .01
+        source["frames"][1]["landmarks"][16]["score"] = .1
+        rows = diagnose(source, include_timeline=True)["timeline"]
+        speeds = [r["arms"]["right"]["wristSpeedTorsoPerSecond"] for r in rows]
+        self.assertEqual(speeds[:3], [None, None, None])
+        self.assertGreater(speeds[3], 0)
+
     def test_opposite_wrist_failure_is_separated_from_observed_arm(self):
         f = frame()
         f["landmarks"][15]["visibility"] = .64

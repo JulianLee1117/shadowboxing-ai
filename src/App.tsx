@@ -23,7 +23,23 @@ function App() {
   const [stance, setStance] = useState<Stance>("orthodox");
   const [duration, setDuration] = useState(30);
   const [drill, setDrill] = useState<DrillId>("open");
-  const [model, setModel] = useState<ModelVariant>("full");
+  const [model, setModel] = useState<ModelVariant>(() => {
+    try {
+      const saved = localStorage.getItem("corner-pose-model");
+      if (saved && ["full", "lite", "heavy", "rtmpose-m"].includes(saved))
+        return saved as ModelVariant;
+    } catch {
+      /* Storage may be unavailable; the camera still works. */
+    }
+    return "full";
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("corner-pose-model", model);
+    } catch {
+      /* Optional preference. */
+    }
+  }, [model]);
   const [overlay, setOverlay] = useState(false);
   const [focused, setFocused] = useState(false);
   const [sound, setSound] = useState(true);
@@ -588,6 +604,7 @@ function App() {
                   <option value="full">Full</option>
                   <option value="lite">Lite</option>
                   <option value="heavy">Heavy</option>
+                  <option value="rtmpose-m">Precision · this Mac</option>
                 </select>
               </label>
               <button

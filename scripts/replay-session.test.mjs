@@ -83,6 +83,11 @@ test("external poses retain honest model/provenance and unknown capture skips", 
   assert.equal(output.benchmark.sourceVideoSha256, "c".repeat(64));
   assert.equal(output.modelManifest.family, "fixture-foreign-pose");
 });
+test("stored learned outputs cannot masquerade as recomputed pose-only decisions", () => {
+  const captured = structuredClone(source);
+  captured.frames[0].recognition = { events: [] };
+  assert.throws(() => replayEvidence(captured, options), /Rerun video/);
+});
 test("rejects wrong videos, truncated runs, missing provenance and browser-model impersonation", () => {
   for (const patch of [
     { videoFingerprint: "f".repeat(64) },

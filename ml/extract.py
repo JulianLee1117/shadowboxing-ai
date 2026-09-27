@@ -98,6 +98,60 @@ def infer_single_person(model, pixels, pose_color_order="BGR"):
     return 1, points[0], scores[0]
 
 
+def filter_embedded_detections(rows, ratio: float, score_threshold: float):
+    """Apply the configured YOLOX threshold to already-NMSed xyxy/score rows.
+
+    This is not person tracking or a largest-box policy. All retained people
+    count, and the caller still abstains if their count differs from one.
+    """
+    if not math.isfinite(ratio) or ratio <= 0:
+        raise ValueError("Detector resize ratio must be finite and positive")
+    if not math.isfinite(score_threshold) or not 0 <= score_threshold <= 1:
+        raise ValueError("Detector score threshold must be between zero and one")
+    boxes, observations = [], []
+    for row in rows:
+        if len(row) != 5 or not all(math.isfinite(float(value)) for value in row):
+            raise ValueError("Expected finite embedded-NMS xyxy/score rows")
+        x1, y1, x2, y2, score = map(float, row)
+        # Zero-padded rows are not observations. Positive malformed boxes must
+        # fail rather than silently authorizing pose on a different person.
+        if score <= 0:
+            continue
+        if x2 <= x1 or y2 <= y1:
+            raise ValueError("Detector emitted a positive-score invalid box")
+        box = [x1 / ratio, y1 / ratio, x2 / ratio, y2 / ratio]
+        accepted = score > score_threshold
+        observations.append({"box": box, "score": score, "accepted": accepted})
+        if accepted:
+            boxes.append(box)
+    return boxes, observations
+
+
+def configure_detector_score_policy(detector) -> None:
+    """Repair rtmlib 0.0.16's embedded-NMS branch ignoring score_thr.
+
+    Other output contracts retain upstream postprocessing. Import numpy only
+    when inference actually needs it, keeping the generic test suite optional.
+    """
+    if getattr(detector, "configured_score_policy", False) is True:
+        return
+    upstream = detector.postprocess
+
+    def postprocess(outputs, ratio=1.0):
+        if outputs.shape[-1] != 5:
+            detector.last_detection_observations = None
+            return upstream(outputs, ratio)
+        import numpy as np
+        boxes, observations = filter_embedded_detections(
+            outputs[0].tolist(), ratio, detector.score_thr)
+        detector.last_detection_observations = observations
+        return np.asarray(boxes, dtype=outputs.dtype).reshape((-1, 4))
+
+    detector.postprocess = postprocess
+    detector.configured_score_policy = True
+    detector.last_detection_observations = None
+
+
 def session_providers(model) -> dict:
     return {key: getattr(model, attribute).session.get_providers()
             for key, attribute in (("detector", "det_model"), ("pose", "pose_model"))}
@@ -177,11 +231,14 @@ def detector_postprocessing(model) -> dict:
     outputs = [{"name": item.name, "shape": item.shape}
                for item in model.det_model.session.get_outputs()]
     embedded_nms = bool(outputs and outputs[0]["shape"][-1] == 5)
+    repaired = getattr(model.det_model, "configured_score_policy", False) is True
     # Pinned rtmlib's five-column output branch ignores score_thr/nms_thr:
     # NMS already happened in ONNX, and its Python filter is fixed at >0.3.
     return {"outputShapes": outputs, "embeddedNms": embedded_nms,
             "configuredScoreThreshold": model.det_model.score_thr,
-            "effectivePostNmsScoreThreshold": .3 if embedded_nms else model.det_model.score_thr,
+            "effectivePostNmsScoreThreshold": .3 if embedded_nms and not repaired else model.det_model.score_thr,
+            "scorePolicy": "configured_score_threshold_v1" if repaired else "upstream_rtmlib_0.0.16",
+            "personSelection": "exactly_one_above_threshold_no_identity_selection",
             "nmsThreshold": "embedded_in_fingerprinted_onnx_graph" if embedded_nms else model.det_model.nms_thr}
 
 
@@ -251,6 +308,7 @@ def main(argv=None) -> int:
             pose_model=RTMPose(manifest["pose"]["path"],
                                model_input_size=tuple(manifest["pose"]["inputSize"]),
                                to_openpose=False, backend="onnxruntime", device="cpu"))
+        configure_detector_score_policy(model.det_model)
         providers = session_providers(model)
         if any(value != ["CPUExecutionProvider"] for value in providers.values()):
             raise ValueError(f"Unexpected execution providers for the CPU protocol: {providers}")
@@ -318,7 +376,9 @@ def main(argv=None) -> int:
                 counts["zeroPeople" if person_count == 0 else "multiplePeople"] += 1
             frames.append({"t": timestamp, "width": width, "height": height,
                            "landmarks": landmarks, "inferenceMs": inference_ms,
-                           "nativeKeypoints": native_points})
+                           "nativeKeypoints": native_points,
+                           "personCount": person_count,
+                           "detectorObservations": model.det_model.last_detection_observations})
             if len(frames) % 100 == 0:
                 print(f"Processed {len(frames)} frames", file=sys.stderr)
         if not frames:

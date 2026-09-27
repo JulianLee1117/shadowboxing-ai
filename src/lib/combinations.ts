@@ -331,7 +331,18 @@ export function groupCombinations(
   events: readonly PunchEvent[],
   options: CombinationOptions,
 ): ComboEvent[] {
-  const recognizer = new CombinationRecognizer(options),
+  // Complete evidence can declare its actual finalization delay. Keep the
+  // streaming API's bound strict, while a late curved event still interrupts
+  // an apparent jab–cross sequence rather than crashing review or being omitted.
+  const maximumArrivalDelayMs = events.reduce(
+    (delay, event) =>
+      Math.max(delay, (event.detectedAtMs ?? event.endMs) - event.peakMs),
+    options.maximumArrivalDelayMs ?? 1800,
+  );
+  const recognizer = new CombinationRecognizer({
+      ...options,
+      maximumArrivalDelayMs,
+    }),
     result: ComboEvent[] = [];
   const sorted = [...events].sort(
     (a, b) =>

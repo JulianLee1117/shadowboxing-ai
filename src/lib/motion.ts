@@ -9,6 +9,8 @@ import {
   type Stance,
 } from "./types";
 import { CurvedMotionObserver } from "./curvedMotion";
+import { observedPoint, observationScore } from "./poseConfidence";
+import { NativeEventAdapter } from "./nativeRecognition";
 
 type Hand = PunchEvent["hand"];
 type Point = { x: number; y: number };
@@ -106,19 +108,11 @@ function angleAt(a: Point, joint: Point, b: Point): number {
   );
 }
 
-function visible(point: Landmark | undefined): point is Landmark {
-  return (
-    finitePoint(point) &&
-    point.x >= 0 &&
-    point.x <= 1 &&
-    point.y >= 0 &&
-    point.y <= 1 &&
-    Number.isFinite(point.visibility) &&
-    point.visibility! >= MOTION_LIMITS.minimumVisibility &&
-    (point.presence === undefined ||
-      (Number.isFinite(point.presence) && point.presence >= 0.5))
-  );
-}
+const visible = (
+  frame: PoseFrame,
+  point: Landmark | undefined,
+): point is Landmark =>
+  observedPoint(frame, point, MOTION_LIMITS.minimumVisibility);
 
 function torsoScale(frame: PoseFrame): number {
   const p = (index: number) =>
@@ -141,7 +135,7 @@ function sharedTrackingReasons(frame: PoseFrame): string[] {
   ) {
     reasons.push("Image dimensions are invalid.");
   }
-  if (!TORSO_JOINTS.every((index) => visible(frame.landmarks[index]))) {
+  if (!TORSO_JOINTS.every((index) => visible(frame, frame.landmarks[index]))) {
     reasons.push(
       "Keep both shoulders and hips visible inside the frame to measure arm motion.",
     );
@@ -169,10 +163,8 @@ export function assessArmTracking(
         ? [JOINT.leftShoulder, JOINT.leftElbow, JOINT.leftWrist]
         : [JOINT.rightShoulder, JOINT.rightElbow, JOINT.rightWrist];
     const points = indices.map((index) => frame.landmarks[index]);
-    const minimumVisibility = points.every((point) =>
-      Number.isFinite(point?.visibility),
-    )
-      ? Math.min(...points.map((point) => point!.visibility!))
+    const minimumVisibility = points.every((point) => finitePoint(point))
+      ? Math.min(...points.map((point) => observationScore(frame, point)))
       : null;
     const base: ArmTrackingState = {
       hand,
@@ -185,7 +177,7 @@ export function assessArmTracking(
     };
     if (sharedReasons.length)
       return { ...base, reason: sharedReasons.join(" ") };
-    if (!points.every(visible)) {
+    if (!points.every((point) => visible(frame, point))) {
       return {
         ...base,
         status: "hidden",
@@ -236,7 +228,7 @@ function trackingQuality(
       ),
     ),
     visibleJoints: REQUIRED_JOINTS.filter((index) =>
-      visible(frame.landmarks[index]),
+      visible(frame, frame.landmarks[index]),
     ).length,
     totalJoints: REQUIRED_JOINTS.length,
   };
@@ -452,6 +444,7 @@ function coherentInward(samples: readonly ArmSample[]): boolean {
  * Image geometry is experimental evidence, not a learned accuracy or form score.
  */
 export class MotionEngine {
+  private native = new NativeEventAdapter();
   private options: EngineOptions;
   private arms: Record<Hand, ArmState> = {
     left: freshArm(),
@@ -471,6 +464,7 @@ export class MotionEngine {
 
   reset(options?: EngineOptions): void {
     if (options) this.options = { ...options };
+    this.native.reset();
     this.clearTracking();
   }
 
@@ -496,6 +490,20 @@ export class MotionEngine {
         ],
       };
     }
+    if (frame.recognition) {
+      // These are finalized decisions about prior observed motion, not a
+      // heuristic on this arrival frame. Keep current tracking quality separate.
+      const events = this.native.update(
+        frame,
+        this.options.stance,
+        this.options.calibrated,
+      );
+      return { quality, events, activeHand: null };
+    }
+    if (this.native.configured)
+      throw new Error(
+        "Local recognition output disappeared during this round.",
+      );
     const aspect = frame.width / frame.height;
     const timeGap = this.lastTime === null ? null : frame.t - this.lastTime;
     if (

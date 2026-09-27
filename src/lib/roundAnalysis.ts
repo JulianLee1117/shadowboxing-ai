@@ -1,23 +1,33 @@
 import modelManifest from "../../model-manifest.json";
 import { DETECTOR_VERSION, MotionEngine } from "./motion";
+import { nativeDetectorVersion } from "./nativeRecognition";
+import { LocalPoseBusyError } from "./localPoseClient";
 import {
   summarizeTrackingTrust,
   TRACKING_TRUST_VERSION,
   type TrackingUncertaintyInterval,
 } from "./trackingTrust";
 export type { TrackingUncertaintyInterval } from "./trackingTrust";
-import type { PoseFrame, PunchEvent, Session, Stance } from "./types";
+import type {
+  ModelVariant,
+  PoseDelegate,
+  PoseFrame,
+  PunchEvent,
+  Session,
+  Stance,
+} from "./types";
 import { VisionRunner } from "./vision";
 import { fingerprintVideo } from "./mediaFingerprint";
 import { openVideoFrames, type VideoFrameSource } from "./videoFrames";
 
-export const REPORT_VERSION = "round-video-analysis-v2-exact-pts";
+export const REPORT_VERSION = "round-video-analysis-v4-local-recognition";
 export const ANALYSIS_VERSION = `${REPORT_VERSION}|${DETECTOR_VERSION}|${TRACKING_TRUST_VERSION}`;
 export const ANALYSIS_LIMITS = {
   maximumDurationMs: 185_000,
   maximumFrames: 5550,
   maximumVideoBytes: 250 * 1024 * 1024,
   maximumWallMs: 240_000,
+  maximumNativeWallMs: 360_000,
   maximumSamplingFps: 60,
   maximumPixels: 3840 * 2160,
 } as const;
@@ -41,8 +51,8 @@ export interface RoundAnalysisReport {
   stance: Stance;
   frames: PoseFrame[];
   events: PunchEvent[];
-  model: "full";
-  delegate: "GPU" | "CPU";
+  model: ModelVariant;
+  delegate: PoseDelegate;
   modelManifest: unknown;
   provenance: {
     source: "saved-video";
@@ -57,6 +67,7 @@ export interface RoundAnalysisReport {
     interpolation: false;
     mirrored: false;
     sequentialInference: true;
+    processingLimitMs?: number;
     trackingTrustVersion: string;
   };
   cadence: {
@@ -82,6 +93,7 @@ export interface RoundAnalysisReport {
   };
 }
 export interface RoundAnalysisOptions {
+  model?: ModelVariant;
   signal?: AbortSignal;
   onProgress?: (progress: AnalysisProgress) => void;
 }
@@ -144,6 +156,22 @@ function requireActive(signal: AbortSignal) {
   if (signal.aborted) throw abortError();
 }
 
+function waitForLocalHandoff(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cancel = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", cancel);
+      reject(abortError());
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }, 50);
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
+  });
+}
+
 /** Fresh local pose inference over saved video; never edits or persists the Session. */
 export async function analyzeRound(
   session: Session,
@@ -153,7 +181,17 @@ export async function analyzeRound(
   if (options.signal?.aborted) throw abortError();
   const started = performance.now();
   const controller = new AbortController();
-  const runner = new VisionRunner("full");
+  const model =
+    options.model ??
+    (session.model === "rtmpose-m" || session.model === "rtmw-l"
+      ? session.model
+      : "full");
+  const runner = new VisionRunner(model);
+  const processingLimitMs =
+    model === "rtmpose-m" || model === "rtmw-l"
+      ? ANALYSIS_LIMITS.maximumNativeWallMs
+      : ANALYSIS_LIMITS.maximumWallMs;
+  const processingLimitMinutes = processingLimitMs / 60_000;
   let decoded: VideoFrameSource | null = null;
   let timedOut = false;
   const cancel = () => controller.abort();
@@ -164,14 +202,15 @@ export async function analyzeRound(
   const deadline = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, ANALYSIS_LIMITS.maximumWallMs);
+  }, processingLimitMs);
   const frames: PoseFrame[] = [],
     events: PunchEvent[] = [];
   const warnings = [
     "A fresh pass is not proof of greater accuracy. Tracking and projected punch labels remain experimental.",
   ];
   const engine = new MotionEngine({ stance: session.stance, calibrated: true });
-  let delegate: "GPU" | "CPU" | null = null;
+  let delegate: PoseDelegate | null = null;
+  let estimatorManifest: unknown = modelManifest;
   let fingerprint = "";
   let plannedFrames = plan.frameCount;
   let cadenceSource = plan.cadenceSource;
@@ -224,6 +263,7 @@ export async function analyzeRound(
       Math.ceil((availableMs * requestedFps) / 1000),
     );
     await runner.init();
+    estimatorManifest = runner.modelInfo ?? modelManifest;
     delegate = runner.delegate;
     if (!delegate)
       throw new Error("Local pose inference did not report its runtime.");
@@ -250,7 +290,22 @@ export async function analyzeRound(
         reason = "Local analysis reached its 5550-frame processing limit.";
         break;
       }
-      const frame = await runner.detectImage(image.canvas, t);
+      let frame: PoseFrame | undefined;
+      // A just-stopped live session can still own the native inference lock.
+      // Hold this decoded image/time pair briefly; never retry other failures.
+      for (let attempt = 0; frame === undefined; attempt++) {
+        requireActive(controller.signal);
+        try {
+          frame = await runner.detectImage(image.canvas, t);
+        } catch (error) {
+          if (!(error instanceof LocalPoseBusyError)) throw error;
+          if (attempt >= 8)
+            throw new Error(
+              "The local tracker is busy in another session. Stop that analysis and try again.",
+            );
+          await waitForLocalHandoff(controller.signal);
+        }
+      }
       requireActive(controller.signal);
       frames.push(frame);
       events.push(...engine.update(frame).events);
@@ -273,10 +328,10 @@ export async function analyzeRound(
   } catch (error) {
     if (options.signal?.aborted) throw abortError();
     if (timedOut && frames.length)
-      reason = "Local analysis reached its four-minute processing limit.";
+      reason = `Local analysis reached its ${processingLimitMinutes}-minute processing limit.`;
     else if (timedOut)
       throw new Error(
-        "Local analysis exceeded its four-minute processing limit before producing frames.",
+        `Local analysis exceeded its ${processingLimitMinutes}-minute processing limit before producing frames.`,
       );
     else throw error;
   } finally {
@@ -306,14 +361,15 @@ export async function analyzeRound(
     sourceDetectorVersion: session.detectorVersion ?? null,
     sourceFingerprint: fingerprint,
     analysisVersion: ANALYSIS_VERSION,
-    detectorVersion: DETECTOR_VERSION,
+    detectorVersion:
+      nativeDetectorVersion(estimatorManifest) ?? DETECTOR_VERSION,
     createdAt: new Date().toISOString(),
     stance: session.stance,
     frames,
     events,
-    model: "full",
+    model,
     delegate,
-    modelManifest: structuredClone(modelManifest),
+    modelManifest: structuredClone(estimatorManifest),
     provenance: {
       source: "saved-video",
       videoBytes: session.video!.size,
@@ -327,6 +383,7 @@ export async function analyzeRound(
       interpolation: false,
       mirrored: false,
       sequentialInference: true,
+      processingLimitMs,
       trackingTrustVersion: TRACKING_TRUST_VERSION,
     },
     cadence: {

@@ -3,6 +3,116 @@ import type { Page } from "@playwright/test";
 
 test.describe("local saved-video analysis service", () => {
   test.setTimeout(90_000);
+  test("keeps native pose identity and score policy through saved-video analysis", async ({
+    page,
+  }) => {
+    const external = await setup(page);
+    const estimator = {
+      id: "rtmpose-m",
+      scoreType: "simcc",
+      minimumScore: 0.55,
+    };
+    const modelInfo = {
+      id: "rtmpose-m",
+      family: "rtmpose-body",
+      backend: "onnxruntime",
+      delegate: "CoreML+CPU",
+      estimator,
+      modelManifest: {
+        detector: {
+          sourceUrl: "https://example.org/detector.onnx",
+          sha256: "a".repeat(64),
+        },
+        pose: {
+          sourceUrl: "https://example.org/pose.onnx",
+          sha256: "b".repeat(64),
+        },
+      },
+    };
+    let deleted = 0;
+    let busyReplies = 0;
+    const times: number[] = [];
+    await page.route("**/local-pose/v1/sessions**", async (route) => {
+      const request = route.request();
+      if (request.method() === "DELETE") {
+        deleted++;
+        return route.fulfill({ status: 200, json: {} });
+      }
+      if (new URL(request.url()).pathname.endsWith("/sessions")) {
+        return route.fulfill({
+          json: {
+            protocolVersion: "local-pose-1",
+            sessionId: "s".repeat(24),
+            token: "t".repeat(48),
+            modelInfo,
+          },
+        });
+      }
+      expect(request.headers()["authorization"]).toBe(
+        `Bearer ${"t".repeat(48)}`,
+      );
+      expect(request.headers()["content-type"]).toBe("image/jpeg");
+      expect(request.postDataBuffer()!.subarray(0, 2).toString("hex")).toBe(
+        "ffd8",
+      );
+      const t = Number(request.headers()["x-frame-time-ms"]);
+      if (busyReplies++ === 0)
+        return route.fulfill({
+          status: 429,
+          json: { error: "Previous session is finishing" },
+        });
+      times.push(t);
+      return route.fulfill({
+        json: {
+          personCount: 1,
+          frame: {
+            t,
+            width: 320,
+            height: 240,
+            inferenceMs: 28,
+            estimator,
+            landmarks: Array.from({ length: 33 }, () => ({
+              x: 0.5,
+              y: 0.5,
+              score: 0.6,
+            })),
+          },
+        },
+      });
+    });
+    const result = await page.evaluate(async () => {
+      const modulePath = "/src/lib/roundAnalysis.ts";
+      const { analyzeRound } = await import(modulePath);
+      const w = window as any;
+      const source = await w.analysisFixture();
+      const original = JSON.stringify(source);
+      const report = await analyzeRound(source, { model: "rtmpose-m" });
+      return {
+        report,
+        unchanged: original === JSON.stringify(source),
+        diagnostics: w.analysisDiagnostics,
+      };
+    });
+    expect(result.unchanged).toBe(true);
+    expect(result.report.model).toBe("rtmpose-m");
+    expect(result.report.delegate).toBe("CoreML+CPU");
+    expect(result.report.provenance.processingLimitMs).toBe(360_000);
+    expect(result.report.modelManifest).toEqual(modelInfo);
+    expect(result.report.frames.length).toBeGreaterThan(4);
+    expect(result.report.frames[0].landmarks[15]).toEqual({
+      x: 0.5,
+      y: 0.5,
+      score: 0.6,
+    });
+    expect(result.report.frames[0].estimator).toEqual(estimator);
+    expect(times.every((t, i) => i === 0 || t > times[i - 1])).toBe(true);
+    expect(busyReplies).toBe(times.length + 1);
+    // The WebCodecs demuxer may use workers; all must be released.
+    expect(result.diagnostics.workers).toBe(result.diagnostics.terminated);
+    expect(result.diagnostics.camera).toBe(0);
+    await expect.poll(() => deleted).toBe(1);
+    expect(external).toEqual([]);
+  });
   test("analyzes generated video sequentially with honest timestamps and releases every resource", async ({
     page,
   }) => {

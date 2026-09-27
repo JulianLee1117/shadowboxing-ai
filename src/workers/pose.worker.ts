@@ -1,5 +1,5 @@
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
-import type { Landmark, ModelVariant, PoseFrame } from "../lib/types";
+import type { Landmark, MediaPipeVariant, PoseFrame } from "../lib/types";
 
 // The pinned SDK contains optional usage logging via fetch. Enforce the local
 // worker's network boundary rather than assuming that self-hosted assets alone
@@ -27,7 +27,7 @@ export type PoseWorkerRequest =
   | {
       type: "init";
       id: number;
-      variant: ModelVariant;
+      variant: MediaPipeVariant;
       delegate: "GPU" | "CPU";
       modelUrl: string;
       wasmUrl: string;

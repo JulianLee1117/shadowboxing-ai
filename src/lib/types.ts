@@ -1,5 +1,7 @@
 export type Stance = "orthodox" | "southpaw";
-export type ModelVariant = "lite" | "full" | "heavy";
+export type MediaPipeVariant = "lite" | "full" | "heavy";
+export type ModelVariant = MediaPipeVariant | "rtmpose-m" | "rtmw-l";
+export type PoseDelegate = "GPU" | "CPU" | "CoreML+CPU";
 export type SourceKind = "camera" | "file" | "demo";
 export interface Landmark {
   x: number;
@@ -7,6 +9,24 @@ export interface Landmark {
   z?: number;
   visibility?: number;
   presence?: number;
+  score?: number; // native estimator score; never a visibility probability
+}
+export interface NativeActionEvent {
+  id: string;
+  hand: "left" | "right";
+  family: "straight" | "hook" | "uppercut";
+  startMs: number;
+  peakMs: number;
+  endMs: number;
+  detectedAtMs: number;
+  score: number;
+}
+export interface NativeRecognition {
+  protocolVersion: "shadowbox-recognition-v1";
+  recognizerId: "personal-hybrid-v1";
+  fingerprint: string;
+  events: NativeActionEvent[];
+  state: "warming" | "active" | "uncertain";
 }
 export interface PoseFrame {
   t: number; // source-relative milliseconds, unmirrored
@@ -16,6 +36,12 @@ export interface PoseFrame {
   worldLandmarks?: Landmark[];
   inferenceMs: number;
   frameAgeMs?: number; // from observed browser frame callback, not sensor exposure
+  estimator?: {
+    id: "rtmpose-m" | "rtmw-l";
+    scoreType: "simcc";
+    minimumScore: number; // explicit experimental observation policy
+  };
+  recognition?: NativeRecognition;
 }
 export interface PunchEvent {
   id: string;
@@ -26,7 +52,7 @@ export interface PunchEvent {
   peakMs: number;
   endMs: number;
   score: number; // heuristic signal score, NOT calibrated confidence
-  extension: number;
+  extension: number | null; // null when the recognizer does not measure it
   // Spatial return to the detector's observed guard/recovery reference by
   // detectedAtMs. A loaded curve's reference can precede startMs. Later return
   // is not assessed, and this is not a technique-quality judgment.

@@ -23,6 +23,19 @@ const punch = (
 });
 const options = { stance: "orthodox" as const, sessionId: "round-1" };
 describe("observed combination grouping", () => {
+  it("groups complete delayed model evidence while an intervening late hook still breaks the combo", () => {
+    const jab = punch("a", "jab", 200, {
+      detectedAtMs: 2200,
+      extension: null,
+      guardReturn: "unassessable",
+    });
+    const cross = punch("b", "cross", 500);
+    const grouped = groupCombinations([cross, jab], options);
+    expect(grouped[0].notation).toBe("1-2");
+    expect(grouped[0].provenance.timing.maximumArrivalDelayMs).toBe(2000);
+    const hook = punch("h", "jab", 350, { label: "hook", detectedAtMs: 2400 });
+    expect(groupCombinations([cross, hook, jab], options)).toEqual([]);
+  });
   it.each([
     [["jab", "cross"], "1-2"],
     [["jab", "jab"], "1-1"],

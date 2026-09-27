@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:mac": "node scripts/start-mac-studio.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
@@ -15,6 +16,7 @@
     "test:e2e": "playwright test",
     "format:check": "prettier --check src tests scripts package.json tsconfig.json vite.config.ts playwright.config.ts index.html .github/workflows/check.yml model-manifest.json",
     "models:setup": "node scripts/setup-models.mjs",
+    "pose:serve": "node scripts/start-local-pose.mjs",
     "check": "npm run format:check && npm run test && npm run test:tools && npm run build",
     "replay": "node scripts/replay-session.mjs",
     "benchmark": "node scripts/benchmark.mjs",

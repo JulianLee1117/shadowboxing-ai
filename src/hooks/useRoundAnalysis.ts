@@ -7,7 +7,7 @@ import {
 } from "../lib/roundAnalysis";
 import { loadRoundAnalysis, saveRoundAnalysis } from "../lib/storage";
 import { fingerprintVideo } from "../lib/mediaFingerprint";
-import type { Session } from "../lib/types";
+import type { ModelVariant, Session } from "../lib/types";
 
 /** One selected-round job. Navigation and unmount invalidate every async callback. */
 export function useRoundAnalysis(session: Session | null) {
@@ -83,7 +83,7 @@ export function useRoundAnalysis(session: Session | null) {
     setProgress(null);
   }, []);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (model?: ModelVariant) => {
     const source = latestSession.current;
     if (!source?.video || source.source === "demo" || controller.current)
       return;
@@ -96,6 +96,7 @@ export function useRoundAnalysis(session: Session | null) {
     setError(null);
     try {
       const result = await analyzeRound(source, {
+        model,
         signal: abort.signal,
         onProgress: (next) => {
           if (generation.current === current) setProgress(next);

@@ -18,6 +18,10 @@ export interface DetectorRecheckReport {
 export function recheckDetections(
   session: Pick<Session, "id" | "stance" | "detectorVersion" | "frames">,
 ): DetectorRecheckReport {
+  if (session.frames.some((frame) => frame.recognition))
+    throw new Error(
+      "Saved learned decisions cannot be recomputed from tracking alone. Analyze the video with the local recognizer.",
+    );
   const engine = new MotionEngine({ stance: session.stance, calibrated: true });
   const events = session.frames.flatMap((frame) => engine.update(frame).events);
   return {

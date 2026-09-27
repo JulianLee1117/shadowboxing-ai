@@ -1,4 +1,10 @@
-import type { ModelVariant, PoseFrame } from "./types";
+import type {
+  MediaPipeVariant,
+  ModelVariant,
+  PoseDelegate,
+  PoseFrame,
+} from "./types";
+import { LocalPoseClient } from "./localPoseClient";
 import type {
   PoseWorkerRequest,
   PoseWorkerReply,
@@ -21,12 +27,17 @@ export class VisionRunner {
   private disposed = false;
   private detecting = false;
   private activeDelegate: Delegate | null = null;
+  private local: LocalPoseClient | null = null;
 
   constructor(private readonly variant: ModelVariant) {}
 
   /** The actual selected delegate. CPU fallback is observable, never implied GPU. */
-  get delegate(): Delegate | null {
-    return this.activeDelegate;
+  get delegate(): PoseDelegate | null {
+    return this.local?.delegate ?? this.activeDelegate;
+  }
+
+  get modelInfo(): unknown {
+    return this.local?.modelInfo ?? null;
   }
 
   init(): Promise<void> {
@@ -38,6 +49,22 @@ export class VisionRunner {
   }
 
   private async initialize(): Promise<void> {
+    if (this.variant === "rtmpose-m" || this.variant === "rtmw-l") {
+      this.local = new LocalPoseClient();
+      await this.local.init();
+      if (this.disposed) {
+        this.local.dispose();
+        throw new Error("Pose runner was disposed during initialization.");
+      }
+      if (this.local.modelInfo?.id !== this.variant) {
+        this.local.dispose();
+        throw new Error(
+          `The local pose service is not configured for ${this.variant}.`,
+        );
+      }
+      this.initialized = true;
+      return;
+    }
     let gpuError: unknown;
     try {
       await this.startWorker("GPU");
@@ -94,7 +121,7 @@ export class VisionRunner {
       {
         type: "init",
         id: this.nextRequestId++,
-        variant: this.variant,
+        variant: this.variant as MediaPipeVariant,
         delegate,
         // The application is local, and these assets are always same-origin.
         modelUrl: new URL(
@@ -125,6 +152,13 @@ export class VisionRunner {
   /** Decoded offline pixels use the same worker and ownership rules as live video. */
   async detectImage(source: ImageBitmapSource, t: number): Promise<PoseFrame> {
     if (this.disposed) throw new Error("Pose runner has been disposed.");
+    if (this.local) {
+      if (!this.initialized)
+        throw new Error(
+          "Initialize the local pose runner before detecting frames.",
+        );
+      return this.local.detectImage(source, t);
+    }
     if (!this.initialized || !this.worker)
       throw new Error("Initialize the pose runner before detecting frames.");
     if (this.detecting)
@@ -210,6 +244,7 @@ export class VisionRunner {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.local?.dispose();
     this.stopWorker(new Error("Pose runner disposed."));
   }
 }

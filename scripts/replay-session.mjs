@@ -55,10 +55,18 @@ try {
   const motion = await readFile(path.join(root, "src/lib/motion.ts"));
   const types = await readFile(path.join(root, "src/lib/types.ts"));
   const curves = await readFile(path.join(root, "src/lib/curvedMotion.ts"));
+  const confidence = await readFile(
+    path.join(root, "src/lib/poseConfidence.ts"),
+  );
+  const recognition = await readFile(
+    path.join(root, "src/lib/nativeRecognition.ts"),
+  );
   const output = replayEvidence(session, {
     MotionEngine,
     detectorVersion: DETECTOR_VERSION,
-    detectorFingerprint: fingerprint(Buffer.concat([motion, types, curves])),
+    detectorFingerprint: fingerprint(
+      Buffer.concat([motion, types, curves, confidence, recognition]),
+    ),
     sessionFingerprint: fingerprint(input),
     poses: posesBytes ? JSON.parse(posesBytes) : undefined,
     posesFingerprint: posesBytes ? fingerprint(posesBytes) : undefined,

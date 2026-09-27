@@ -9,6 +9,12 @@ import type {
   Stance,
 } from "../lib/types";
 import { VisionRunner } from "../lib/vision";
+import { LocalPoseBusyError } from "../lib/localPoseClient";
+import { LatestFramePump } from "../lib/latestFramePump";
+import {
+  nativeDetectorVersion,
+  relativePoseFrame,
+} from "../lib/nativeRecognition";
 import { MotionEngine, assessQuality, DETECTOR_VERSION } from "../lib/motion";
 import { demoFrame } from "../lib/demo";
 import { percentile } from "../lib/storage";
@@ -40,6 +46,8 @@ interface RoundData {
   source: SourceKind;
   model: ModelVariant | "synthetic";
   capture: Session["capture"];
+  modelManifest: unknown;
+  detectorVersion: string;
 }
 
 /** Decode an uploaded clip without playing it through model initialization. */
@@ -109,7 +117,7 @@ export function useStudio(onComplete: (session: Session) => void) {
   const generation = useRef(0);
   const raf = useRef(0);
   const videoCallback = useRef<number | null>(null);
-  const busy = useRef(false);
+  const framePump = useRef<LatestFramePump | null>(null);
   const lastMedia = useRef(-1);
   const lastSource = useRef(0);
   const sourceStart = useRef(0);
@@ -117,7 +125,6 @@ export function useStudio(onComplete: (session: Session) => void) {
   const fileUrl = useRef<string | null>(null);
   const sourceFile = useRef<File | null>(null);
   const finalizing = useRef<Promise<void> | null>(null);
-  const pendingFrame = useRef<Promise<void> | null>(null);
   const closingAt = useRef<number | null>(null);
   const round = useRef<RoundData | null>(null);
   const roundDeadline = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,6 +180,8 @@ export function useStudio(onComplete: (session: Session) => void) {
     if (mounted.current) setElapsed(durationMs);
     const originalFile = sourceFile.current;
     closingAt.current = endSource;
+    framePump.current?.discardPending();
+    const pendingFrame = framePump.current?.whenIdle();
     if (data.source === "file") videoRef.current?.pause();
     const rec = recorder.current;
     recorder.current = null;
@@ -200,10 +209,10 @@ export function useStudio(onComplete: (session: Session) => void) {
           rec.stop();
         });
       }
-      if (pendingFrame.current) {
+      if (pendingFrame) {
         let timeout: ReturnType<typeof setTimeout> | undefined;
         await Promise.race([
-          pendingFrame.current,
+          pendingFrame,
           new Promise<void>((resolve) => {
             timeout = setTimeout(resolve, 3000);
           }),
@@ -234,8 +243,8 @@ export function useStudio(onComplete: (session: Session) => void) {
           0.95,
         ),
         skippedFrames: data.skipped,
-        modelManifest,
-        detectorVersion: DETECTOR_VERSION,
+        modelManifest: data.modelManifest,
+        detectorVersion: data.detectorVersion,
         capture: data.capture,
       };
       complete.current(session);
@@ -252,6 +261,8 @@ export function useStudio(onComplete: (session: Session) => void) {
 
   const releaseSource = useCallback(() => {
     generation.current++;
+    framePump.current?.dispose();
+    framePump.current = null;
     clearRoundClock();
     cancelAnimationFrame(raf.current);
     runner.current?.dispose();
@@ -272,7 +283,6 @@ export function useStudio(onComplete: (session: Session) => void) {
     fileUrl.current = null;
     sourceFile.current = null;
     sourceRef.current = null;
-    busy.current = false;
     recentTimes.current = [];
     lastMedia.current = -1;
     lastSource.current = 0;
@@ -303,7 +313,7 @@ export function useStudio(onComplete: (session: Session) => void) {
         (closingAt.current !== null && next.t > closingAt.current))
     )
       return;
-    const analyzed = data ? { ...next, t: next.t - data.start } : next;
+    const analyzed = data ? relativePoseFrame(next, data.start) : next;
     const result = data
       ? engine.current.update(analyzed)
       : { quality: assessQuality(next), events: [], activeHand: null };
@@ -339,6 +349,39 @@ export function useStudio(onComplete: (session: Session) => void) {
 
   const loop = useCallback(
     (gen: number) => {
+      const vision = runner.current;
+      framePump.current?.dispose();
+      const pump = new LatestFramePump({
+        process: async (bitmap, mediaMs, observedAt) => {
+          if (gen !== generation.current || !vision) return;
+          const result = await vision.detectImage(bitmap, mediaMs);
+          if (gen !== generation.current) return;
+          receive({ ...result, frameAgeMs: performance.now() - observedAt });
+        },
+        onSkipped: () => {
+          if (gen === generation.current && round.current)
+            round.current.skipped++;
+        },
+        onError: (e) => {
+          if (gen !== generation.current) return;
+          if (e instanceof LocalPoseBusyError) {
+            if (round.current) round.current.skipped++;
+            if (performance.now() - displayAt.current > 500) {
+              setFrame(null);
+              setFps(0);
+              setQuality({
+                ...EMPTY_QUALITY,
+                label: "Tracker busy",
+                reasons: ["Another local analysis is using the tracker."],
+              });
+            }
+            return;
+          }
+          setError(e.message);
+          void stop();
+        },
+      });
+      framePump.current = pump;
       const processFrame = (mediaMs: number) => {
         const video = videoRef.current;
         if (
@@ -353,32 +396,8 @@ export function useStudio(onComplete: (session: Session) => void) {
         // Its frame is used for warmup, not queued ahead of the next round.
         if (sourceRef.current === "file" && video.paused) return;
         if (mediaMs === lastMedia.current) return;
-        if (busy.current) {
-          if (round.current) round.current.skipped++;
-          lastMedia.current = mediaMs;
-          return;
-        }
         lastMedia.current = mediaMs;
-        busy.current = true;
-        const observedAt = performance.now();
-        pendingFrame.current = runner.current
-          .detect(video, mediaMs)
-          .then((result) => {
-            if (gen !== generation.current) return;
-            receive({ ...result, frameAgeMs: performance.now() - observedAt });
-          })
-          .catch((e) => {
-            if (gen !== generation.current) return;
-            setError(
-              e instanceof Error
-                ? e.message
-                : "Pose analysis stopped. Restart the camera to try again.",
-            );
-            void stop();
-          })
-          .finally(() => {
-            if (gen === generation.current) busy.current = false;
-          });
+        pump.push(video, mediaMs, performance.now());
       };
       const video = videoRef.current;
       if (sourceRef.current !== "demo" && video?.requestVideoFrameCallback) {
@@ -473,6 +492,7 @@ export function useStudio(onComplete: (session: Session) => void) {
           // Warm it while paused so a short clip cannot end with every frame busy.
           const warmup = await vision.detect(video, 0);
           if (gen !== generation.current) return;
+          lastMedia.current = 0;
           setFrame(warmup);
           setQuality(assessQuality(warmup));
         } else {
@@ -510,11 +530,12 @@ export function useStudio(onComplete: (session: Session) => void) {
       const kind = sourceRef.current;
       if (kind === "file" && (videoRef.current?.currentTime ?? 0) > 0) {
         const gen = ++generation.current;
+        framePump.current?.dispose();
+        framePump.current = null;
         cancelAnimationFrame(raf.current);
         if (videoCallback.current !== null)
           videoRef.current?.cancelVideoFrameCallback?.(videoCallback.current);
         runner.current?.dispose();
-        busy.current = false;
         setStatus("loading");
         const vision = new VisionRunner(variantRef.current);
         runner.current = vision;
@@ -525,6 +546,7 @@ export function useStudio(onComplete: (session: Session) => void) {
           if (gen !== generation.current) return;
           const warmup = await vision.detect(video, 0);
           if (gen !== generation.current) return;
+          lastMedia.current = 0;
           setFrame(warmup);
           setQuality(assessQuality(warmup));
           setFps(0);
@@ -543,7 +565,8 @@ export function useStudio(onComplete: (session: Session) => void) {
       // Reset imported playback explicitly so ended clips cannot inherit stale timestamps.
       if (kind === "file" && videoRef.current) {
         videoRef.current.currentTime = 0;
-        lastMedia.current = -1;
+        // The first paused frame was already consumed by estimator warmup.
+        lastMedia.current = 0;
         recentTimes.current = [];
       }
       const start =
@@ -552,6 +575,7 @@ export function useStudio(onComplete: (session: Session) => void) {
           : kind === "file"
             ? 0
             : (videoRef.current?.currentTime ?? 0) * 1000;
+      framePump.current?.discardPending();
       engine.current.reset({
         stance: config.stance,
         calibrated: config.calibrated || kind === "demo",
@@ -568,6 +592,9 @@ export function useStudio(onComplete: (session: Session) => void) {
         createdAt: new Date().toISOString(),
         source: kind,
         model: kind === "demo" ? "synthetic" : variantRef.current,
+        modelManifest: runner.current?.modelInfo ?? modelManifest,
+        detectorVersion:
+          nativeDetectorVersion(runner.current?.modelInfo) ?? DETECTOR_VERSION,
         capture: {
           width: kind === "demo" ? 1280 : (videoRef.current?.videoWidth ?? 0),
           height: kind === "demo" ? 720 : (videoRef.current?.videoHeight ?? 0),

@@ -123,6 +123,19 @@ def scores(tp: int, fp: int, fn: int, exposure_ms: float) -> dict:
             "falseEventsPerMinute": fp * 60000 / exposure_ms if exposure_ms > 0 else None}
 
 
+BROWSER_MODELS = ("lite", "full", "heavy", "synthetic", "rtmpose-m", "rtmw-l")
+
+
+def native_estimator(value: Any) -> bool:
+    return (isinstance(value, dict) and value.get("id") in ("rtmpose-m", "rtmw-l")
+            and value.get("scoreType") == "simcc" and finite(value.get("minimumScore"))
+            and 0 < value["minimumScore"] < 1)
+
+
+def valid_fingerprint(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
 def validate_session(session: Any, allow_synthetic: bool = False) -> dict:
     if not isinstance(session, dict) or session.get("schemaVersion") != "1.0":
         raise ValueError("Expected a browser session object with schemaVersion '1.0'")
@@ -151,10 +164,33 @@ def validate_session(session: Any, allow_synthetic: bool = False) -> dict:
                     raise ValueError(f"Replacement poses require {key}")
             if not session.get("modelManifest") or not provenance.get("timestampMode"):
                 raise ValueError("Replacement pose model and timestamp provenance are required")
-        elif session.get("model") not in ("lite", "full", "heavy", "synthetic"):
+        elif session.get("model") not in BROWSER_MODELS:
             raise ValueError("Saved-frame replay must retain the browser model identity")
-    elif session.get("model") not in ("lite", "full", "heavy", "synthetic"):
-        raise ValueError("Session model must match schema 1.0: lite, full, heavy, or synthetic")
+    elif session.get("model") not in BROWSER_MODELS:
+        raise ValueError("Session model must match a supported browser estimator")
+    native = session.get("model") in ("rtmpose-m", "rtmw-l")
+    recognizer = None
+    if native:
+        manifest = session.get("modelManifest")
+        if (not isinstance(manifest, dict) or manifest.get("id") != session["model"]
+                or not native_estimator(manifest.get("estimator"))
+                or manifest["estimator"]["id"] != session["model"]):
+            raise ValueError("Native browser estimator requires its model identity and score policy")
+        weights = manifest.get("modelManifest", {})
+        for key in ("detector", "pose"):
+            item = weights.get(key, {}) if isinstance(weights, dict) else {}
+            digest = item.get("sha256") if isinstance(item, dict) else None
+            if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise ValueError("Native browser estimator requires model weight fingerprints")
+        recognizer = manifest.get("recognizer")
+        if recognizer is not None:
+            if (not isinstance(recognizer, dict)
+                    or recognizer.get("protocolVersion") != "shadowbox-recognition-v1"
+                    or recognizer.get("recognizerId") != "personal-hybrid-v1"
+                    or not all(valid_fingerprint(recognizer.get(key)) for key in
+                               ("fingerprint", "checkpointSha256", "externalModelSha256", "poseModelSha256"))
+                    or recognizer["poseModelSha256"] != weights["pose"]["sha256"]):
+                raise ValueError("Local recognizer model provenance is invalid")
     synthetic = session.get("source") == "demo" or session.get("model") == "synthetic"
     if synthetic and not allow_synthetic:
         raise ValueError("Synthetic/demo sessions are excluded. Use --allow-synthetic only for software checks.")
@@ -181,6 +217,7 @@ def validate_session(session: Any, allow_synthetic: bool = False) -> dict:
             if field == "events" and "detectedAtMs" in item:
                 number(item["detectedAtMs"], f"events.{item['id']}.detectedAtMs")
     previous = -1.0
+    native_decisions = {}
     for i, frame in enumerate(session["frames"]):
         if not isinstance(frame, dict):
             raise ValueError(f"frames[{i}] must be an object")
@@ -193,27 +230,75 @@ def validate_session(session: Any, allow_synthetic: bool = False) -> dict:
             number(frame["frameAgeMs"], f"frames[{i}].frameAgeMs")
         if not isinstance(frame.get("landmarks"), list):
             raise ValueError(f"frames[{i}].landmarks must be an array")
+        if native and frame.get("estimator") != session["modelManifest"]["estimator"]:
+            raise ValueError("Native frame score policy must match the captured model manifest")
+        if "estimator" in frame and not native_estimator(frame["estimator"]):
+            raise ValueError("Native frame score policy is invalid")
+        if "estimator" in frame and session["model"] in ("lite", "full", "heavy", "synthetic"):
+            raise ValueError("MediaPipe or synthetic sessions cannot claim native estimator scores")
+        decisions = frame.get("recognition")
+        if decisions is not None or recognizer is not None:
+            if (not isinstance(decisions, dict) or recognizer is None
+                    or any(decisions.get(key) != recognizer[key] for key in
+                           ("protocolVersion", "recognizerId", "fingerprint"))
+                    or decisions.get("state") not in ("warming", "active", "uncertain")
+                    or not isinstance(decisions.get("events"), list)):
+                raise ValueError("Local frame recognition must match its captured model provenance")
+            for decision in decisions["events"]:
+                if (not isinstance(decision, dict)
+                        or decision.get("hand") not in ("left", "right")
+                        or decision.get("family") not in ("straight", "hook", "uppercut")
+                        or not isinstance(decision.get("id"), str) or not decision["id"]
+                        or not all(finite(decision.get(key)) for key in
+                                   ("startMs", "peakMs", "endMs", "detectedAtMs", "score"))
+                        or not 0 <= decision["startMs"] <= decision["peakMs"] <= decision["endMs"] <= decision["detectedAtMs"] <= t + .001
+                        or decision["startMs"] >= decision["endMs"]
+                        or not 0 <= decision["score"] <= 1):
+                    raise ValueError("Local recognition must use finite causal round timestamps")
+                prior = native_decisions.get(decision["id"])
+                if prior is not None and prior != decision:
+                    raise ValueError("Local recognition repeated an ID with conflicting evidence")
+                native_decisions[decision["id"]] = decision
         for dimension in ("width", "height"):
             if number(frame.get(dimension), f"frames[{i}].{dimension}") <= 0:
                 raise ValueError("Frame image dimensions must be positive")
+    if recognizer is not None:
+        if session.get("stance") not in ("orthodox", "southpaw"):
+            raise ValueError("Local recognition requires the captured stance")
+        for predicted in session["events"]:
+            decision = native_decisions.get(predicted["id"])
+            if decision is None:
+                raise ValueError("Native prediction has no emitted frame decision")
+            role = "lead" if (decision["hand"] == "left") == (session["stance"] == "orthodox") else "rear"
+            label = ("jab" if role == "lead" else "cross") if decision["family"] == "straight" else decision["family"]
+            if (predicted["hand"] != decision["hand"] or predicted["label"] != label
+                    or predicted.get("role", role) != role
+                    or any(predicted.get(key) != decision[key] for key in
+                           ("startMs", "peakMs", "endMs", "detectedAtMs", "score"))):
+                raise ValueError("Native prediction must match its emitted decision and stance mapping")
     return session
 
 
-def joint_visible(landmarks: list, index: int, threshold: float) -> bool:
+def joint_visible(landmarks: list, index: int, threshold: float, estimator: dict | None = None) -> bool:
     if index >= len(landmarks) or not isinstance(landmarks[index], dict):
         return False
     joint = landmarks[index]
     if not all(finite(joint.get(axis)) and 0 <= joint[axis] <= 1 for axis in ("x", "y")):
         return False
+    if estimator is not None:
+        return (native_estimator(estimator) and finite(joint.get("score"))
+                and joint["score"] >= estimator["minimumScore"])
     confidences = [joint[key] for key in ("visibility", "presence") if key in joint]
     return bool(confidences) and all(finite(c) and threshold <= c <= 1 for c in confidences)
 
 
 def pose_coverage(frames: list[dict], required_joints: tuple[int, ...], threshold: float) -> dict:
-    visible = [[joint_visible(f["landmarks"], j, threshold) for j in required_joints] for f in frames]
+    visible = [[joint_visible(f["landmarks"], j, threshold, f.get("estimator")) for j in required_joints] for f in frames]
     count = sum(all(row) for row in visible)
+    policies = {json.dumps(f["estimator"], sort_keys=True) for f in frames if "estimator" in f}
     return {"kind": "processed_frame_landmark_coverage_not_criterion_coverage",
-            "requiredJoints": list(required_joints), "minimumConfidence": threshold,
+            "requiredJoints": list(required_joints), "minimumConfidence": None if policies else threshold,
+            "nativeScorePolicies": [json.loads(p) for p in sorted(policies)],
             "processedFrames": len(frames), "assessableFrames": count,
             "fraction": count / len(frames) if frames else None,
             "perJointFraction": {str(j): sum(row[i] for row in visible) / len(frames) if frames else None

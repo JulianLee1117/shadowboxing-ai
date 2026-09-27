@@ -12,3 +12,13 @@ source modifications are included in Corner.
 
 Pose runtime and model provenance are documented at /models/README.md
 and in model-manifest.json in the project source.
+
+Optional personal recognizer (weights are not bundled)
+The local recognizer can use an explicitly provisioned checkpoint from
+ACM40960/Boxing, commit c9d94ffa0ae24b8065c6c40f5f9f8dc453619676.
+Copyright (c) 2025 Jayaganeshan Thanga Kumar and Kabilesh Sekar.
+Licensed under the MIT license:
+https://github.com/ACM40960/Boxing/blob/c9d94ffa0ae24b8065c6c40f5f9f8dc453619676/LICENSE
+The local bundle retains the upstream license and pins its hash together with
+the checkpoint hash. Source and personal training provenance are described
+in docs/personal-recognition.md. No upstream accuracy claim is adopted.

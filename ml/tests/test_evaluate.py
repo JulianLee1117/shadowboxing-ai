@@ -21,6 +21,67 @@ def metrics(s):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_native_predictions_match_causal_decisions_and_model_fingerprints(self):
+        s = session()
+        s.update(model="rtmpose-m", stance="orthodox")
+        policy = {"id": "rtmpose-m", "scoreType": "simcc", "minimumScore": .55}
+        recognizer = {"protocolVersion": "shadowbox-recognition-v1", "recognizerId": "personal-hybrid-v1",
+                      "fingerprint": "c" * 64, "checkpointSha256": "d" * 64,
+                      "externalModelSha256": "e" * 64, "poseModelSha256": "b" * 64}
+        decision = {"id": "native-1", "hand": "right", "family": "straight", "startMs": 100,
+                    "peakMs": 200, "endMs": 400, "detectedAtMs": 850, "score": .9}
+        s["modelManifest"] = {"id": "rtmpose-m", "estimator": policy, "recognizer": recognizer,
+                              "modelManifest": {"detector": {"sha256": "a" * 64}, "pose": {"sha256": "b" * 64}}}
+        s["frames"] = [{"t": 900, "width": 640, "height": 480, "inferenceMs": 30,
+                        "estimator": policy, "landmarks": [], "recognition": {
+                            **{k: recognizer[k] for k in ("protocolVersion", "recognizerId", "fingerprint")},
+                            "state": "active", "events": [decision]}}]
+        s["events"] = [{**decision, "label": "cross", "role": "rear", "extension": None}]
+        del s["events"][0]["family"]
+        evaluate_session(s)
+        for target, key, value in [("event", "label", "jab"), ("event", "id", "invented"),
+                                   ("decision", "detectedAtMs", 901), ("recognition", "fingerprint", "f" * 64)]:
+            broken = copy.deepcopy(s)
+            selected = {"event": broken["events"][0],
+                        "decision": broken["frames"][0]["recognition"]["events"][0],
+                        "recognition": broken["frames"][0]["recognition"]}[target]
+            selected[key] = value
+            with self.assertRaises(ValueError):
+                evaluate_session(broken)
+
+    def test_native_browser_scores_require_matching_provenance_and_own_policy(self):
+        s = session()
+        s["model"] = "rtmpose-m"
+        policy = {"id": "rtmpose-m", "scoreType": "simcc", "minimumScore": .55}
+        s["modelManifest"] = {"id": "rtmpose-m", "estimator": policy,
+                              "modelManifest": {"detector": {"sha256": "a" * 64},
+                                                "pose": {"sha256": "b" * 64}}}
+        s["frames"] = [{"t": 0, "width": 640, "height": 480, "inferenceMs": 28,
+                        "estimator": copy.deepcopy(policy),
+                        "landmarks": [{"x": .5, "y": .5, "score": .6} for _ in range(33)]}]
+        result = evaluate_session(s, min_confidence=.9)
+        self.assertEqual(result["coverage"]["fraction"], 1)
+        self.assertEqual(result["coverage"]["nativeScorePolicies"], [policy])
+        self.assertIsNone(result["coverage"]["minimumConfidence"])
+        s["frames"][0]["landmarks"][15] = {"x": .5, "y": .5, "score": .3, "visibility": 1}
+        self.assertEqual(evaluate_session(s)["coverage"]["fraction"], 0)
+        broken = copy.deepcopy(s)
+        broken["frames"][0]["estimator"]["minimumScore"] = .2
+        with self.assertRaisesRegex(ValueError, "must match"):
+            evaluate_session(broken)
+        broken = copy.deepcopy(s)
+        broken["modelManifest"]["estimator"]["id"] = "rtmw-l"
+        broken["frames"][0]["estimator"]["id"] = "rtmw-l"
+        with self.assertRaisesRegex(ValueError, "model identity"):
+            evaluate_session(broken)
+        broken = copy.deepcopy(s)
+        broken["model"] = "full"
+        with self.assertRaisesRegex(ValueError, "cannot claim native"):
+            evaluate_session(broken)
+        del s["modelManifest"]["modelManifest"]["pose"]
+        with self.assertRaisesRegex(ValueError, "fingerprints"):
+            evaluate_session(s)
+
     def test_research_model_requires_explicit_fingerprinted_benchmark(self):
         s = session()
         s["model"] = "rtmpose-m-offline"
