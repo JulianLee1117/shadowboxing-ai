@@ -12,6 +12,7 @@ import { useStudio } from "./hooks/useStudio";
 import { PoseOverlay } from "./components/PoseOverlay";
 import { RoundReview } from "./components/RoundReview";
 import { LiveFeedback } from "./components/LiveFeedback";
+import { ChoiceGroup, UtilityPanel } from "./components/ChoiceGroup";
 import { assessArmTracking } from "./lib/motion";
 import { ReadinessGate } from "./lib/readiness";
 import { DRILLS, type DrillId } from "./lib/drills";
@@ -40,12 +41,11 @@ function App() {
       /* Optional preference. */
     }
   }, [model]);
-  const [overlay, setOverlay] = useState(false);
+  const [overlay, setOverlay] = useState(true);
   const [focused, setFocused] = useState(false);
   const [sound, setSound] = useState(true);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<Session | null>(null);
-  const [autoAnalyzeId, setAutoAnalyzeId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saveStates, setSaveStates] = useState<
     Record<string, "saving" | "saved" | "error">
@@ -85,16 +85,7 @@ function App() {
         ...old.filter((s) => s.id !== session.id),
       ]);
       setSelected(session);
-      // A failed import may still preserve its original video in a zero-length
-      // round. Retain that evidence without launching another failing analysis.
-      setAutoAnalyzeId(
-        session.video &&
-          session.source !== "demo" &&
-          Number.isFinite(session.durationMs) &&
-          session.durationMs > 0
-          ? session.id
-          : null,
-      );
+      // Capture already produced a result. Re-analysis is an explicit review action.
       setView("review");
       void persist(session);
     },
@@ -470,14 +461,18 @@ function App() {
                 >
                   <span
                     className={
-                      tracking?.left.assessable ? "tracked" : "uncertain"
+                      tracking?.left.assessable
+                        ? "tracked hand-left"
+                        : "uncertain hand-left"
                     }
                   >
                     L · {tracking?.left.assessable ? "tracked" : "uncertain"}
                   </span>
                   <span
                     className={
-                      tracking?.right.assessable ? "tracked" : "uncertain"
+                      tracking?.right.assessable
+                        ? "tracked hand-right"
+                        : "uncertain hand-right"
                     }
                   >
                     R · {tracking?.right.assessable ? "tracked" : "uncertain"}
@@ -487,32 +482,28 @@ function App() {
             </div>
             <div className="practice-controls">
               <div className="round-settings">
-                <label>
-                  Lead hand
-                  <select
-                    aria-label="Lead hand"
-                    value={stance}
-                    disabled={active || studio.status === "loading"}
-                    onChange={(e) => setStance(e.target.value as Stance)}
-                  >
-                    <option value="orthodox">Left hand leads</option>
-                    <option value="southpaw">Right hand leads</option>
-                  </select>
-                </label>
-                <label>
-                  Round
-                  <select
-                    aria-label="Round duration"
-                    value={duration}
-                    disabled={active || studio.status === "loading"}
-                    onChange={(e) => setDuration(Number(e.target.value))}
-                  >
-                    <option value={30}>30 seconds</option>
-                    <option value={60}>1 minute</option>
-                    <option value={120}>2 minutes</option>
-                    <option value={180}>3 minutes</option>
-                  </select>
-                </label>
+                <ChoiceGroup
+                  label="Lead hand"
+                  value={stance}
+                  disabled={active || studio.status === "loading"}
+                  onChange={setStance}
+                  options={[
+                    { value: "orthodox", label: "Left hand leads" },
+                    { value: "southpaw", label: "Right hand leads" },
+                  ]}
+                />
+                <ChoiceGroup
+                  label="Round duration"
+                  value={duration}
+                  disabled={active || studio.status === "loading"}
+                  onChange={setDuration}
+                  options={[
+                    { value: 30, label: "30s" },
+                    { value: 60, label: "1 min" },
+                    { value: 120, label: "2 min" },
+                    { value: 180, label: "3 min" },
+                  ]}
+                />
               </div>
               <div className="action-group">
                 {readiness.pending ? (
@@ -558,24 +549,22 @@ function App() {
                 ? "Synthetic motion for trying the controls. No camera or accuracy measurement."
                 : "Record round gives you 8 seconds to step back, then saves video + tracking locally. No microphone."}
           </div>
-          <details className="options" open={active ? false : undefined}>
-            <summary>More options</summary>
+          <UtilityPanel
+            key={active ? "active-options" : "idle-options"}
+            label="More options"
+            className="practice-options"
+          >
             <div className="options-content">
-              <label>
-                Practice focus
-                <select
-                  aria-label="Practice focus"
-                  value={drill}
-                  disabled={active || studio.status === "loading"}
-                  onChange={(e) => setDrill(e.target.value as DrillId)}
-                >
-                  {Object.entries(DRILLS).map(([id, value]) => (
-                    <option value={id} key={id}>
-                      {value.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <ChoiceGroup
+                label="Practice focus"
+                value={drill}
+                onChange={setDrill}
+                disabled={active || studio.status === "loading"}
+                options={Object.entries(DRILLS).map(([id, value]) => ({
+                  value: id as DrillId,
+                  label: value.label,
+                }))}
+              />
               <label className="checkbox">
                 <input
                   type="checkbox"
@@ -593,20 +582,18 @@ function App() {
                 />
                 Countdown sound
               </label>
-              <label>
-                Model
-                <select
-                  aria-label="Model"
-                  value={model}
-                  disabled={studio.status !== "off" || active}
-                  onChange={(e) => setModel(e.target.value as ModelVariant)}
-                >
-                  <option value="full">Full</option>
-                  <option value="lite">Lite</option>
-                  <option value="heavy">Heavy</option>
-                  <option value="rtmpose-m">Precision · this Mac</option>
-                </select>
-              </label>
+              <ChoiceGroup
+                label="Model"
+                value={model}
+                onChange={setModel}
+                disabled={studio.status !== "off" || active}
+                options={[
+                  { value: "full", label: "Full" },
+                  { value: "lite", label: "Lite" },
+                  { value: "heavy", label: "Heavy" },
+                  { value: "rtmpose-m", label: "Precision · this Mac" },
+                ]}
+              />
               <button
                 className="text-button"
                 disabled={active || studio.status === "loading"}
@@ -626,10 +613,10 @@ function App() {
             <p>
               Frame your head through hips, leaving room for both arms to
               extend. L / R are the model’s hand labels: check they follow your
-              physical hands. Amber means uncertain tracking. A visible hand can
-              still be mislabeled.
+              physical hands. Blue is left, orange is right; dashed lines mean
+              uncertain tracking. A visible hand can still be mislabeled.
             </p>
-          </details>
+          </UtilityPanel>
           <input
             ref={uploadRef}
             type="file"
@@ -647,8 +634,6 @@ function App() {
           <RoundReview
             sessions={sessions}
             selected={selected}
-            autoAnalyze={selected?.id === autoAnalyzeId}
-            onAutoAnalysisHandled={() => setAutoAnalyzeId(null)}
             saveState={
               selected ? (saveStates[selected.id] ?? "saved") : "saved"
             }

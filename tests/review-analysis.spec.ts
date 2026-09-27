@@ -137,6 +137,9 @@ async function setup(page: Page, count = 1) {
 async function openReview(page: Page) {
   await page.getByRole("button", { name: /^Saved rounds/ }).click();
   await expect(page.locator(".analysis-panel")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Re-run analysis", exact: true })
+    .click();
 }
 async function finish(page: Page, index: number) {
   await page.evaluate(async (i) => {
@@ -189,6 +192,10 @@ test("v1 migration preserves originals; separate analysis and focus survive relo
   expect(before.version).toBe(2);
   expect(before.analyses).toEqual([]);
   await openReview(page);
+  await page.locator(".replay-stage video").evaluate((video) => {
+    (window as any).__replayNode = video;
+    (window as any).__replaySrc = (video as HTMLVideoElement).src;
+  });
   await expect(
     page.getByText("Focus: Double jab", { exact: true }),
   ).toBeVisible();
@@ -212,6 +219,23 @@ test("v1 migration preserves originals; separate analysis and focus survive relo
     "Video analysis",
   );
   await expect(page.locator(".review-count.punch-2 strong")).toHaveText("1");
+  await page
+    .getByRole("checkbox", { name: "Show tracking", exact: true })
+    .uncheck();
+  await page
+    .getByRole("checkbox", { name: "Show tracking", exact: true })
+    .check();
+  await page.getByLabel("Show detections", { exact: true }).uncheck();
+  await page.getByLabel("Show detections", { exact: true }).check();
+  expect(
+    await page
+      .locator(".replay-stage video")
+      .evaluate(
+        (video) =>
+          video === (window as any).__replayNode &&
+          (video as HTMLVideoElement).src === (window as any).__replaySrc,
+      ),
+  ).toBe(true);
   await page.reload();
   await openReview(page);
   await expect(
@@ -223,6 +247,28 @@ test("v1 migration preserves originals; separate analysis and focus survive relo
   await expect(page.locator(".detection-heading")).toContainText(
     "Original detections",
   );
+  const rerun = page.getByRole("button", {
+    name: "Analyze again",
+    exact: true,
+  });
+  await expect(rerun).toHaveCount(1);
+  await expect(
+    page
+      .locator(".analysis-actions")
+      .getByRole("button", { name: "Analyze again", exact: true }),
+  ).toBeVisible();
+  await rerun.click();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__analysisJobs.length))
+    .toBe(1);
+  await expect(
+    page.getByRole("button", { name: "Cancel analysis", exact: true }),
+  ).toBeVisible();
+  await finish(page, 0);
+  await expect(
+    page.getByText("Round analysis ready", { exact: true }),
+  ).toBeVisible();
+  expect((await dbState(page)).sessions).toEqual(before.sessions);
   await page.getByText("Export & details", { exact: true }).click();
   const evidence = await exported(page, "Evidence JSON"),
     analysis = await exported(page, "Export video analysis");
@@ -307,15 +353,10 @@ test("atomic deletion removes derived analysis and refuses a late resurrection",
   expect(state.analyses).toEqual([]);
 });
 
-test("only a newly completed video round auto-analyzes; reopening stored rounds does not start jobs", async ({
+test("completed rounds show live results immediately and never start a second pass without a click", async ({
   page,
 }) => {
   await setup(page);
-  await openReview(page);
-  expect(await page.evaluate(() => (window as any).__analysisJobs.length)).toBe(
-    0,
-  );
-  await page.getByRole("button", { name: "Practice", exact: true }).click();
   await page.evaluate(() =>
     (window as any).__completeRound(
       (window as any).__makeSession("new-round", "2026-02-01T00:00:00.000Z"),
@@ -324,16 +365,32 @@ test("only a newly completed video round auto-analyzes; reopening stored rounds 
   await expect(
     page.getByRole("heading", { name: "Review", exact: true }),
   ).toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__analysisJobs.length))
-    .toBe(1);
-  await finish(page, 0);
-  await expect.poll(async () => (await dbState(page)).analyses.length).toBe(1);
-  await page.reload();
+  await expect(page.locator(".review-count.punch-1 strong")).toHaveText("1");
+  await expect(page.locator(".detection-heading")).toContainText(
+    "Original detections",
+  );
+  await expect(
+    page.getByRole("checkbox", { name: "Show tracking", exact: true }),
+  ).toBeChecked();
+  await expect(page.locator("select,details")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Analyze recording", exact: true }),
+  ).not.toBeVisible();
+  await expect.poll(async () => (await dbState(page)).sessions.length).toBe(2);
   expect(await page.evaluate(() => (window as any).__analysisJobs.length)).toBe(
     0,
   );
-  await page.getByRole("button", { name: /^Saved rounds/ }).click();
+  expect((await dbState(page)).analyses).toEqual([]);
+  await page
+    .getByRole("button", { name: "Re-run analysis", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Analyze recording", exact: true })
+    .click();
+  await finish(page, 0);
+  await expect.poll(async () => (await dbState(page)).analyses.length).toBe(1);
+  await page.reload();
+  await openReview(page);
   await expect(
     page.getByText("Round analysis ready", { exact: true }),
   ).toBeVisible();
@@ -361,6 +418,12 @@ test("same-sized replacement footage and changed timing cannot reuse a cached an
     });
     w.__completeRound(changed);
   });
+  await expect(
+    page.getByRole("button", { name: "Analyze recording", exact: true }),
+  ).toBeEnabled();
+  await page
+    .getByRole("button", { name: "Analyze recording", exact: true })
+    .click();
   await expect
     .poll(() => page.evaluate(() => (window as any).__analysisJobs.length))
     .toBe(2);
@@ -380,6 +443,12 @@ test("same-sized replacement footage and changed timing cannot reuse a cached an
       durationMs: 900,
     });
   });
+  await expect(
+    page.getByRole("button", { name: "Analyze recording", exact: true }),
+  ).toBeEnabled();
+  await page
+    .getByRole("button", { name: "Analyze recording", exact: true })
+    .click();
   await expect
     .poll(() => page.evaluate(() => (window as any).__analysisJobs.length))
     .toBe(3);
@@ -479,7 +548,10 @@ test("zero-length failed import is preserved without starting automatic analysis
     page.getByRole("heading", { name: "Review", exact: true }),
   ).toBeVisible();
   await expect.poll(async () => (await dbState(page)).sessions.length).toBe(2);
-  // Waiting for cache loading to finish also lets the auto-analysis effect run.
+  await page
+    .getByRole("button", { name: "Re-run analysis", exact: true })
+    .click();
+  // Cache loading must never start inference.
   await expect(
     page.getByRole("button", { name: "Analyze recording", exact: true }),
   ).toBeEnabled();
@@ -505,4 +577,104 @@ test("zero-length failed import is preserved without starting automatic analysis
   );
   expect(stored?.videoBytes).toBe(3);
   expect((await dbState(page)).analyses).toEqual([]);
+});
+
+test("a playable recording stays mounted and visible across optional analysis and result switches", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1512, height: 823 });
+  await setup(page);
+  await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 640;
+    canvas.height = 360;
+    const context = canvas.getContext("2d")!;
+    const stream = canvas.captureStream(15);
+    const chunks: Blob[] = [];
+    const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+    const done = new Promise<Blob>((resolve) => {
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = () => resolve(new Blob(chunks, { type: "video/webm" }));
+    });
+    recorder.start();
+    for (let i = 0; i < 18; i++) {
+      context.fillStyle = "#213d55";
+      context.fillRect(0, 0, 640, 360);
+      context.fillStyle = "#80d8ff";
+      context.fillRect(100 + i * 10, 80, 60, 150);
+      await new Promise((resolve) => setTimeout(resolve, 70));
+    }
+    recorder.stop();
+    const video = await done;
+    stream.getTracks().forEach((track) => track.stop());
+    const w = window as any;
+    w.__completeRound({
+      ...w.__makeSession("playable", "2026-02-01T00:00:00.000Z"),
+      video,
+    });
+  });
+  const video = page.locator(".replay-stage video");
+  await expect(video).toHaveJSProperty("readyState", 4);
+  await expect(
+    page.getByRole("button", { name: "Play replay", exact: true }),
+  ).toBeInViewport({ ratio: 1 });
+  await expect(video).toBeInViewport({ ratio: 1 });
+  await video.evaluate((node) => {
+    (window as any).__originalPlayer = node;
+    (window as any).__originalUrl = (node as HTMLVideoElement).src;
+    (node as HTMLVideoElement).currentTime = 0.4;
+  });
+  await expect(page.getByLabel("Replay position")).toHaveValue("400");
+  expect(await page.evaluate(() => (window as any).__analysisJobs.length)).toBe(
+    0,
+  );
+  await page
+    .getByRole("button", { name: "Re-run analysis", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Analyze recording", exact: true })
+    .click();
+  await finish(page, 0);
+  await page
+    .getByRole("button", { name: "Show video analysis", exact: true })
+    .click();
+  await expect(video).toBeInViewport({ ratio: 1 });
+  await expect(video).toHaveJSProperty("readyState", 4);
+  expect(
+    await video.evaluate(
+      (node) =>
+        node === (window as any).__originalPlayer &&
+        (node as HTMLVideoElement).src === (window as any).__originalUrl,
+    ),
+  ).toBe(true);
+  await expect(page.getByLabel("Replay position")).toHaveValue("400");
+  await page
+    .getByRole("button", { name: "Show original", exact: true })
+    .click();
+  await page
+    .getByRole("checkbox", { name: "Show tracking", exact: true })
+    .uncheck();
+  await page
+    .getByRole("checkbox", { name: "Show tracking", exact: true })
+    .check();
+  expect(
+    await video.evaluate(
+      (node) =>
+        node === (window as any).__originalPlayer &&
+        (node as HTMLVideoElement).src === (window as any).__originalUrl,
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Play replay", exact: true }).click();
+  await expect(video).toHaveJSProperty("paused", false);
+  await page.getByRole("button", { name: "Pause replay", exact: true }).click();
+  await page.screenshot({
+    path: test.info().outputPath("replay-stable-desktop.png"),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await page.screenshot({
+    path: test.info().outputPath("replay-stable-mobile.png"),
+  });
 });

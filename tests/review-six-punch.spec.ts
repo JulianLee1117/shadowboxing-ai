@@ -109,7 +109,11 @@ test("review preserves six punch identities, physical hands and original evidenc
     await expect(counts.nth(i)).toContainText(names[i]);
     await expect(counts.nth(i).locator("strong")).toHaveText("1");
   }
-  await expect(page.getByLabel("Detected punches")).toHaveCount(0);
+  await expect(page.getByLabel("Detected punches")).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: "Show tracking", exact: true }),
+  ).toBeChecked();
+  await expect(page.locator("select, details")).toHaveCount(0);
   await page.getByLabel("Show detections").check();
   const cards = page.getByLabel("Detected punches").getByRole("button");
   await expect(cards).toHaveCount(6);

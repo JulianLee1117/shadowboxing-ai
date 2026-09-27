@@ -1,4 +1,5 @@
 import type { NativeRecognition, PoseFrame } from "./types";
+import { FrameEncoder } from "./frameEncoder";
 
 const PROTOCOL_VERSION = "local-pose-1";
 const MAXIMUM_PIXELS = 921_600;
@@ -196,6 +197,7 @@ export class LocalPoseClient {
   private disposed = false;
   private detecting = false;
   private lastTimestamp = -1;
+  private encoder: FrameEncoder | null = null;
 
   constructor(
     options: {
@@ -323,15 +325,24 @@ export class LocalPoseClient {
       // Rounding both dimensions upward can exceed the server's pixel cap.
       const width = Math.max(1, Math.floor(bitmap.width * scale));
       const height = Math.max(1, Math.floor(bitmap.height * scale));
-      const canvas = new OffscreenCanvas(width, height);
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("Local pose image capture is unavailable.");
-      context.drawImage(bitmap, 0, 0, width, height);
       const captured = performance.now();
-      const jpeg = await canvas.convertToBlob({
-        type: "image/jpeg",
-        quality: 0.95,
-      });
+      let jpeg: Blob;
+      if (typeof Worker !== "undefined") {
+        this.encoder ??= new FrameEncoder();
+        jpeg = await this.encoder.encode(bitmap, width, height);
+        bitmap = undefined; // transferred ownership
+      } else {
+        // Environments without workers retain the same bounded pixel contract.
+        const canvas = new OffscreenCanvas(width, height);
+        const context = canvas.getContext("2d");
+        if (!context)
+          throw new Error("Local pose image capture is unavailable.");
+        context.drawImage(bitmap, 0, 0, width, height);
+        jpeg = await canvas.convertToBlob({
+          type: "image/jpeg",
+          quality: 0.95,
+        });
+      }
       if (jpeg.type !== "image/jpeg" || jpeg.size > MAXIMUM_IMAGE_BYTES)
         throw new Error(
           "Frame encoding exceeded the local pose transport limit.",
@@ -484,6 +495,7 @@ export class LocalPoseClient {
     if (this.disposed) return;
     this.disposed = true;
     this.controller?.abort();
+    this.encoder?.dispose();
     if (this.credentials) this.closeSession(this.credentials);
     this.credentials = null;
     this.info = null;

@@ -1376,3 +1376,138 @@ footer {
     transition: none !important;
   }
 }
+
+/* Direct controls: primary camera first, secondary tools have no menu arrows. */
+:root {
+  --hand-left: #80d8ff;
+  --hand-right: #ffac75;
+}
+.choice-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.choice-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.choice-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.choice-group button {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 36px;
+}
+.choice-group button[aria-pressed="true"] {
+  color: #fff;
+  background: #293e34;
+  border-color: #293e34;
+}
+.choice-group button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.utility-panel {
+  border-top: 1px solid var(--border);
+  padding: 10px 0;
+}
+.utility-toggle {
+  min-height: 36px;
+  text-align: left;
+  font-size: 12px;
+}
+.utility-toggle[aria-expanded="true"] {
+  color: var(--ink);
+}
+.utility-toggle > span {
+  color: var(--muted);
+  font-weight: 400;
+}
+.utility-content {
+  padding: 12px 0;
+}
+.utility-content[hidden] {
+  display: none;
+}
+.utility-content > p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.practice .round-settings {
+  gap: 24px;
+  align-items: center;
+}
+.practice .round-settings .choice-field {
+  flex-shrink: 0;
+}
+.practice-options .options-content {
+  align-items: flex-start;
+}
+.practice-options .choice-field:first-child {
+  flex-basis: 100%;
+}
+.practice .tracking-strip .hand-left.tracked {
+  color: var(--hand-left);
+}
+.practice .tracking-strip .hand-right.tracked {
+  color: var(--hand-right);
+}
+.pose-line.hand-left {
+  stroke: var(--hand-left);
+}
+.pose-line.hand-right {
+  stroke: var(--hand-right);
+}
+.pose-line.body {
+  stroke: #e5edf2;
+}
+.pose-joint.hand-left {
+  fill: var(--hand-left);
+}
+.pose-joint.hand-right {
+  fill: var(--hand-right);
+}
+.pose-line.uncertain {
+  stroke: #ffd28c;
+  stroke-dasharray: 8 7;
+  opacity: 0.65;
+}
+.pose-joint.uncertain {
+  fill: #ffd28c;
+  opacity: 0.65;
+}
+.pose-halo {
+  stroke: #071118aa;
+}
+.pose-line {
+  stroke-width: 4;
+}
+.practice .practice-controls {
+  margin-top: 0;
+}
+@media (max-width: 700px) {
+  .practice .round-settings {
+    flex-wrap: wrap;
+    gap: 10px 18px;
+  }
+  .choice-group button {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+  .practice .round-settings .choice-field {
+    flex: 1;
+  }
+  .practice .camera-stage {
+    height: max(310px, calc(100dvh - 365px));
+  }
+}

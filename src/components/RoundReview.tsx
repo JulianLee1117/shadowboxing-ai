@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -11,6 +18,7 @@ import {
   Minimize2,
 } from "lucide-react";
 import { PoseOverlay } from "./PoseOverlay";
+import { ChoiceGroup, UtilityPanel } from "./ChoiceGroup";
 import { punchName, punchNotation } from "../lib/punches";
 import "./RoundReview.css";
 import { assessArmTracking, DETECTOR_VERSION } from "../lib/motion";
@@ -30,8 +38,6 @@ import type { Session, SessionAnnotation } from "../lib/types";
 type Props = {
   sessions: Session[];
   selected: Session | null;
-  autoAnalyze: boolean;
-  onAutoAnalysisHandled: () => void;
   saveState: "saving" | "saved" | "error";
   onSelect: (session: Session) => void;
   onUpdate: (session: Session) => Promise<void>;
@@ -43,8 +49,6 @@ type Props = {
 export function RoundReview({
   sessions,
   selected,
-  autoAnalyze,
-  onAutoAnalysisHandled,
   saveState,
   onSelect,
   onUpdate,
@@ -59,12 +63,13 @@ export function RoundReview({
   const wasFullscreen = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [overlay, setOverlay] = useState(false);
-  const [showPredictions, setShowPredictions] = useState(false);
+  const [overlay, setOverlay] = useState(true);
+  const [showPredictions, setShowPredictions] = useState(true);
   const [recheck, setRecheck] = useState<DetectorRecheckReport | null>(null);
   const analysis = useRoundAnalysis(selected);
   const [useVideoAnalysis, setUseVideoAnalysis] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoRatio, setVideoRatio] = useState<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const offset = selected?.videoOffsetMs ?? 0;
   const duration = selected?.durationMs ?? 0;
@@ -111,6 +116,11 @@ export function RoundReview({
     { notation: "6", name: "Rear uppercut", plural: "rear uppercuts" },
   ].map((identity) => ({
     ...identity,
+    hand:
+      (Number(identity.notation) % 2 === 1) ===
+      (selected?.stance !== "southpaw")
+        ? "left"
+        : "right",
     count: detectionEvents.filter(
       (event) => punchNotation(event) === identity.notation,
     ).length,
@@ -131,6 +141,7 @@ export function RoundReview({
   };
   useEffect(() => {
     leaveFocus();
+    window.scrollTo({ top: 0, behavior: "instant" });
   }, [sessionId, leaveFocus]);
   useEffect(() => {
     const changed = () => {
@@ -161,25 +172,6 @@ export function RoundReview({
   useEffect(() => setRecheck(null), [sessionId, DETECTOR_VERSION]);
   useEffect(() => setUseVideoAnalysis(false), [sessionId]);
   useEffect(() => {
-    if (
-      !autoAnalyze ||
-      analysis.loadingSaved ||
-      analysis.running ||
-      saveState === "saving"
-    )
-      return;
-    onAutoAnalysisHandled();
-    if (!analysis.report) void analysis.start();
-  }, [
-    autoAnalyze,
-    analysis.loadingSaved,
-    analysis.running,
-    analysis.report,
-    analysis.start,
-    saveState,
-    onAutoAnalysisHandled,
-  ]);
-  useEffect(() => {
     if (analysis.report) {
       // Fresh decoding can change tracking and has not beaten saved-pose replay
       // on the development set. Keep it a deliberate comparison, never silently
@@ -190,10 +182,11 @@ export function RoundReview({
   }, [analysis.report]);
   useEffect(() => {
     setTime(0);
+    setVideoRatio(null);
     setPlaying(false);
     setPlaybackRate(1);
-    setOverlay(!videoBlob);
-    setShowPredictions(false);
+    setOverlay(true);
+    setShowPredictions(true);
     if (!videoBlob) {
       setVideoUrl(null);
       return;
@@ -266,6 +259,7 @@ export function RoundReview({
       videoRef.current.currentTime = (next + offset) / 1000;
   };
   const stepTo = (ms: number) => {
+    playerRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
     videoRef.current?.pause();
     setPlaying(false);
     seek(ms);
@@ -401,7 +395,19 @@ export function RoundReview({
             }}
           >
             <div className="review-player-heading">
-              <span>{selected.video ? "Recording" : "Motion replay"}</span>
+              <div className="review-player-result">
+                <span>{selected.video ? "Recording" : "Motion replay"}</span>
+                <strong>{detectionEvents.length} detected</strong>
+                <span>
+                  {videoReport
+                    ? "Video pass"
+                    : updated
+                      ? "Rechecked"
+                      : selected.source === "camera"
+                        ? "Live results"
+                        : "Saved results"}
+                </span>
+              </div>
               <button
                 ref={focusButtonRef}
                 className="text-button review-focus-button"
@@ -412,14 +418,33 @@ export function RoundReview({
                 {focused ? "Exit focus" : "Focus video"}
               </button>
             </div>
-            <div className="replay-stage" key={selected.id}>
+            <div
+              className="replay-stage"
+              key={selected.id}
+              style={
+                {
+                  "--replay-ratio":
+                    videoRatio ??
+                    (selected.frames[0]
+                      ? selected.frames[0].width / selected.frames[0].height
+                      : 16 / 9),
+                } as CSSProperties
+              }
+            >
               {videoUrl ? (
                 <video
                   ref={videoRef}
                   src={videoUrl}
-                  controls
                   playsInline
                   onLoadedMetadata={(e) => {
+                    if (
+                      e.currentTarget.videoWidth > 0 &&
+                      e.currentTarget.videoHeight > 0
+                    )
+                      setVideoRatio(
+                        e.currentTarget.videoWidth /
+                          e.currentTarget.videoHeight,
+                      );
                     e.currentTarget.currentTime = offset / 1000;
                     sync(e.currentTarget);
                   }}
@@ -453,7 +478,7 @@ export function RoundReview({
                 >
                   <small>Detected</small>
                   {visibleDetections.map((event) => (
-                    <div key={event.id}>
+                    <div key={event.id} className={`hand-${event.hand}`}>
                       <strong>{punchName(event)}</strong>
                       <span>{event.hand} hand</span>
                     </div>
@@ -504,17 +529,15 @@ export function RoundReview({
               <span>{formatTime(duration)}</span>
             </div>
             <div className="review-toggles">
-              <label>
-                Speed
-                <select
-                  aria-label="Playback speed"
-                  value={playbackRate}
-                  onChange={(e) => setPlaybackRate(Number(e.target.value))}
-                >
-                  <option value={0.5}>0.5×</option>
-                  <option value={1}>1×</option>
-                </select>
-              </label>
+              <ChoiceGroup
+                label="Playback speed"
+                value={playbackRate}
+                options={[
+                  { value: 0.5, label: "0.5×" },
+                  { value: 1, label: "1×" },
+                ]}
+                onChange={setPlaybackRate}
+              />
               <label className="checkbox">
                 <input
                   type="checkbox"
@@ -543,91 +566,6 @@ export function RoundReview({
             </div>
           </div>
           <div className="review-below" inert={focused}>
-            {selected.video && selected.source !== "demo" && (
-              <div className="analysis-panel">
-                <div className="analysis-row">
-                  <div>
-                    <strong>
-                      {analysis.running
-                        ? "Analyzing locally…"
-                        : analysis.report
-                          ? analysis.report.completeness.status === "partial"
-                            ? "Partial analysis available"
-                            : "Round analysis ready"
-                          : "Review this recording"}
-                    </strong>
-                    <p>
-                      {analysis.running
-                        ? "You can watch while analysis runs."
-                        : analysis.report
-                          ? analysis.report.completeness.status === "partial"
-                            ? analysis.report.completeness.reason
-                            : "An experimental second pass, available to compare."
-                          : "Analyze punches and combinations on this device."}
-                    </p>
-                  </div>
-                  <div className="analysis-actions">
-                    {analysis.running ? (
-                      <>
-                        <span className="analysis-progress-text">
-                          {Math.round((analysis.progress?.fraction ?? 0) * 100)}
-                          %
-                        </span>
-                        <button
-                          className="text-button"
-                          onClick={analysis.cancel}
-                        >
-                          Cancel analysis
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        {analysis.report && (
-                          <button
-                            className="text-button"
-                            onClick={() => {
-                              if (useVideoAnalysis) setRecheck(null);
-                              setUseVideoAnalysis((old) => !old);
-                              setShowPredictions(true);
-                            }}
-                          >
-                            {useVideoAnalysis
-                              ? "Show original"
-                              : "Show video analysis"}
-                          </button>
-                        )}
-                        {!analysis.report && (
-                          <button
-                            className="button secondary"
-                            disabled={analysis.loadingSaved}
-                            onClick={() => void analysis.start()}
-                          >
-                            Analyze recording
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-                {analysis.running && (
-                  <progress
-                    aria-label="Round analysis progress"
-                    max={1}
-                    value={analysis.progress?.fraction ?? 0}
-                  />
-                )}
-                {analysis.error && (
-                  <p className="analysis-error" role="alert">
-                    {analysis.error}
-                  </p>
-                )}
-                {analysis.report && !analysis.saved && (
-                  <p className="analysis-error">
-                    Analysis is available in this tab. Export it before closing.
-                  </p>
-                )}
-              </div>
-            )}
             {overlay && !frame && (
               <p className="muted" role="status">
                 No recent pose sample at this moment. The overlay is hidden.
@@ -682,7 +620,7 @@ export function RoundReview({
                 {punchCounts.map((punch) => (
                   <div
                     key={punch.notation}
-                    className={`review-count punch-${punch.notation}`}
+                    className={`review-count punch-${punch.notation} hand-${punch.hand}`}
                   >
                     <span className="review-count-name">
                       <span>{punch.notation}</span>
@@ -703,7 +641,7 @@ export function RoundReview({
                         {detectionEvents.map((event) => (
                           <button
                             key={event.id}
-                            className={`review-punch-tick punch-${punchNotation(event)}`}
+                            className={`review-punch-tick punch-${punchNotation(event)} hand-${event.hand}`}
                             style={{
                               left: `${Math.max(0, Math.min(100, (event.peakMs / duration) * 100))}%`,
                             }}
@@ -735,7 +673,7 @@ export function RoundReview({
                       detectionEvents.map((event) => (
                         <button
                           key={event.id}
-                          className={`event-chip ${event.label} punch-${punchNotation(event)} ${visibleDetections.includes(event) ? "is-current" : ""}`}
+                          className={`event-chip ${event.label} punch-${punchNotation(event)} hand-${event.hand} ${visibleDetections.includes(event) ? "is-current" : ""}`}
                           onClick={() => stepTo(event.startMs)}
                         >
                           <b className="review-punch-number" aria-hidden="true">
@@ -781,13 +719,11 @@ export function RoundReview({
                 </div>
               )}
               {showPredictions && !!uncertaintyIntervals.length && (
-                <details
+                <UtilityPanel
                   className="uncertainty-details"
                   key={`uncertainty-${videoReport?.id ?? selected.id}`}
+                  label={`Uncertain tracking · ${uncertaintyIntervals.length} moments`}
                 >
-                  <summary>
-                    Uncertain tracking · {uncertaintyIntervals.length} moments
-                  </summary>
                   <p>
                     Check the video at these moments. An uncertain track cannot
                     establish a technique error.
@@ -822,7 +758,7 @@ export function RoundReview({
                         " The full timeline is included in the analysis export."}
                     </p>
                   )}
-                </details>
+                </UtilityPanel>
               )}
             </div>
             {!selected.video && selected.source !== "demo" && (
@@ -832,6 +768,95 @@ export function RoundReview({
                 footage.
               </p>
             )}
+            {selected.video && selected.source !== "demo" && (
+              <UtilityPanel label="Re-run analysis" className="analysis-panel">
+                <div className="analysis-row">
+                  <div>
+                    <strong>
+                      {analysis.running
+                        ? "Analyzing locally…"
+                        : analysis.report
+                          ? analysis.report.completeness.status === "partial"
+                            ? "Partial analysis available"
+                            : "Round analysis ready"
+                          : "Optional second pass"}
+                    </strong>
+                    <p>
+                      {analysis.running
+                        ? "You can watch while analysis runs."
+                        : analysis.report
+                          ? analysis.report.completeness.status === "partial"
+                            ? analysis.report.completeness.reason
+                            : "An experimental second pass, available to compare."
+                          : "Your live results are already saved. Re-run only to compare tracking; this can take a few minutes and may not improve it."}
+                    </p>
+                  </div>
+                  <div className="analysis-actions">
+                    {analysis.running ? (
+                      <>
+                        <span className="analysis-progress-text">
+                          {Math.round((analysis.progress?.fraction ?? 0) * 100)}
+                          %
+                        </span>
+                        <button
+                          className="text-button"
+                          onClick={analysis.cancel}
+                        >
+                          Cancel analysis
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {analysis.report && (
+                          <button
+                            className="text-button"
+                            onClick={() => {
+                              if (useVideoAnalysis) setRecheck(null);
+                              setUseVideoAnalysis((old) => !old);
+                              setShowPredictions(true);
+                              playerRef.current?.scrollIntoView({
+                                block: "start",
+                                behavior: "smooth",
+                              });
+                            }}
+                          >
+                            {useVideoAnalysis
+                              ? "Show original"
+                              : "Show video analysis"}
+                          </button>
+                        )}
+                        <button
+                          className="button secondary"
+                          disabled={analysis.running || analysis.loadingSaved}
+                          onClick={() => void analysis.start()}
+                        >
+                          {analysis.report
+                            ? "Analyze again"
+                            : "Analyze recording"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {analysis.running && (
+                  <progress
+                    aria-label="Round analysis progress"
+                    max={1}
+                    value={analysis.progress?.fraction ?? 0}
+                  />
+                )}
+                {analysis.error && (
+                  <p className="analysis-error" role="alert">
+                    {analysis.error}
+                  </p>
+                )}
+                {analysis.report && !analysis.saved && (
+                  <p className="analysis-error">
+                    Analysis is available in this tab. Export it before closing.
+                  </p>
+                )}
+              </UtilityPanel>
+            )}
             <ReferenceLabels
               key={`labels-${selected.id}`}
               session={selected}
@@ -839,8 +864,10 @@ export function RoundReview({
               onNotice={onNotice}
               seek={seek}
             />
-            <details className="options" key={`export-${selected.id}`}>
-              <summary>Export & details</summary>
+            <UtilityPanel
+              label="Export & details"
+              key={`export-${selected.id}`}
+            >
               <div className="export-buttons">
                 {analysis.report && (
                   <button
@@ -937,13 +964,6 @@ export function RoundReview({
                   {analysis.report.warnings.map((warning) => (
                     <p key={warning}>{warning}</p>
                   ))}
-                  <button
-                    className="text-button"
-                    disabled={analysis.running}
-                    onClick={() => void analysis.start()}
-                  >
-                    Analyze again
-                  </button>
                 </div>
               )}
               {updated && (
@@ -991,7 +1011,7 @@ export function RoundReview({
                 Software updates do not rewrite saved results. Local browser
                 storage is not a backup.
               </p>
-            </details>
+            </UtilityPanel>
           </div>
         </>
       )}
@@ -1044,43 +1064,36 @@ function ReferenceLabels({
     setNote("");
   };
   return (
-    <details className="options">
-      <summary>Label this round (optional)</summary>
+    <UtilityPanel label="Label this round (optional)">
       <p>
         Label the original video independently, including missed punches. A
         skeleton alone cannot validate the tracking.
       </p>
       <div className="annotation-fields">
-        <label>
-          Action
-          <select
-            aria-label="Annotation action"
-            value={label}
-            onChange={(e) =>
-              setLabel(e.target.value as SessionAnnotation["label"])
-            }
-          >
-            {["jab", "cross", "hook", "uppercut", "other", "unobservable"].map(
-              (v) => (
-                <option key={v}>{v}</option>
-              ),
-            )}
-          </select>
-        </label>
-        <label>
-          Hand
-          <select
-            aria-label="Annotation hand"
-            value={hand}
-            onChange={(e) =>
-              setHand(e.target.value as SessionAnnotation["hand"])
-            }
-          >
-            {["left", "right", "unknown"].map((v) => (
-              <option key={v}>{v}</option>
-            ))}
-          </select>
-        </label>
+        <ChoiceGroup
+          label="Annotation action"
+          value={label}
+          onChange={setLabel}
+          options={(
+            [
+              "jab",
+              "cross",
+              "hook",
+              "uppercut",
+              "other",
+              "unobservable",
+            ] as const
+          ).map((value) => ({ value, label: value }))}
+        />
+        <ChoiceGroup
+          label="Annotation hand"
+          value={hand}
+          onChange={setHand}
+          options={(["left", "right", "unknown"] as const).map((value) => ({
+            value,
+            label: value,
+          }))}
+        />
         <label>
           Start (s)
           <input
@@ -1155,6 +1168,6 @@ function ReferenceLabels({
         I reviewed the entire round and labeled every action, including missed
         detections.
       </label>
-    </details>
+    </UtilityPanel>
   );
 }

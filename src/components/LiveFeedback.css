@@ -118,3 +118,63 @@
     animation: none;
   }
 }
+
+/* Color identifies physical hand, never whether a punch has correct form. */
+.live-feedback.hand-left .live-punch-name.detected,
+.live-feedback.hand-left .live-eyebrow {
+  color: var(--hand-left);
+}
+.live-feedback.hand-right .live-punch-name.detected,
+.live-feedback.hand-right .live-eyebrow {
+  color: var(--hand-right);
+}
+.live-feedback .live-punch-name.detected {
+  font-size: clamp(36px, 5vw, 72px);
+}
+.live-feedback {
+  padding-top: 26px;
+  background: linear-gradient(transparent, #08100d35 45%, #08100da0);
+}
+.live-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 23px;
+}
+.detection-tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: currentColor;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-shadow: none;
+  animation: detection-tick 450ms ease-out;
+}
+.hand-left .detection-tick {
+  background: var(--hand-left);
+  color: #092235;
+}
+.hand-right .detection-tick {
+  background: var(--hand-right);
+  color: #351a09;
+}
+@keyframes detection-tick {
+  from {
+    transform: scale(1.25);
+    box-shadow: 0 0 0 5px #ffffff20;
+  }
+  to {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .detection-tick {
+    animation: none;
+  }
+}

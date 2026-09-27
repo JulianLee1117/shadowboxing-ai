@@ -19,7 +19,8 @@ RECOGNIZER_ID = "personal-hybrid-v1"
 FEATURE_VERSION = "arm-offsets-native-v3"
 MAXIMUM_GAP_MS = 150
 HISTORY_MS = 4200
-LOOKAHEAD_MS = 800
+LOOKAHEAD_MS = 300
+DECODER_VERSION = "observed-personal-cycles-v3"
 
 
 def _digest(path):
@@ -120,6 +121,7 @@ class ModelBundle:
             or manifest.get("recognizerId") != RECOGNIZER_ID
             or manifest.get("featureVersion") != FEATURE_VERSION
             or manifest.get("architecture") != "causal-arm-tcn-40-48-d1248-v1"
+            or manifest.get("decoderVersion") != DECODER_VERSION
         ):
             raise ValueError(
                 "Unsupported recognizer protocol, features, or architecture"
@@ -130,6 +132,19 @@ class ModelBundle:
             raise ValueError(
                 "Recognizer executable feature/runtime fingerprint mismatch"
             )
+        training_summary = manifest.get("personalTraining")
+        training_hash = manifest.get("trainingProtocolSha256")
+        if (
+            not isinstance(training_summary, str)
+            or not 1 <= len(training_summary) <= 500
+        ):
+            raise ValueError("Recognizer requires a bounded training summary")
+        if (
+            not isinstance(training_hash, str)
+            or len(training_hash) != 64
+            or any(c not in "0123456789abcdef" for c in training_hash)
+        ):
+            raise ValueError("Recognizer requires its training protocol SHA-256")
         _validate_pose(manifest, pose_model_info)
         temporal_path = _verified_path(manifest_path.parent, manifest.get("checkpoint"))
         family_path = _verified_path(
@@ -184,7 +199,10 @@ class ModelBundle:
                 "numpy": np.__version__,
                 "scipy": __import__("scipy").__version__,
             },
-            "personalTraining": "one personal development recording; no independent held-out curved-punch validation",
+            "personalTraining": training_summary,
+            "decoderVersion": DECODER_VERSION,
+            "trainingProtocolSha256": training_hash,
+            "maximumUncertainArmRetentionMs": 250,
             "timeGridHz": 30,
             "maximumNormalizationCacheMs": 250,
             "maximumContextMs": HISTORY_MS,
@@ -303,6 +321,8 @@ class RecognizerSession:
         self.accepted = []
         self.seen_straights = []
         self.counter = 0
+        self.last_proposal_t = -1e9
+        self.predictions = []
 
     def dispose(self):
         self.reset()
@@ -314,6 +334,23 @@ class RecognizerSession:
             label = int(p.argmax())
             active = label != 0 and p[label] >= 0.65 and valid[h]
             state = self.curves[h]
+            # Missing current geometry cannot become a new event or recovery.
+            # Brief losses retain classification state only, never joint positions.
+            if state is not None and not valid[h]:
+                if state.get("uncertainSince") is None:
+                    state["uncertainSince"] = t
+                if t - state["sourceLast"] > 250:
+                    self.curves[h] = None
+                continue
+            if (
+                state is not None
+                and state.get("uncertainSince") is not None
+                and t - state["sourceLast"] > 250
+            ):
+                self.curves[h] = None
+                state = None
+            if state is not None:
+                state["uncertainSince"] = None
             if state is None:
                 if active:
                     self.curves[h] = {
@@ -347,7 +384,7 @@ class RecognizerSession:
             if t - state["gap"] < 100:
                 continue
             if (
-                state["label"] in (2, 3)
+                state["label"] in (1, 2, 3)
                 and state["last"] - state["start"] >= 66
                 and state["frames"] >= 3
                 and state["sourceCount"] >= 3
@@ -358,36 +395,107 @@ class RecognizerSession:
                     for value in self.grid
                     if state["start"] <= value["t"] <= state["last"]
                 ]
-                features, geometry, _ = self.bundle.classification_features(samples)
-                support = self.bundle.family_probabilities(features)
-                if support[1] + support[2] >= 0.5:
-                    # Peak is an observed projected trajectory extremum, not the
-                    # time of maximum network confidence or inferred impact.
-                    points = geometry[:, h]
-                    finite = self.bundle.np.isfinite(points).all(1)
-                    if finite.any():
-                        ids = self.bundle.np.flatnonzero(finite)
-                        if state["label"] == 3:
-                            selected = ids[points[ids, 1].argmin()]
-                        else:
-                            motion = self.bundle.np.linalg.norm(
-                                points[ids, :2] - points[ids[0], :2], axis=1
-                            )
-                            selected = ids[motion.argmax()]
-                        peak = samples[int(selected)].get(
-                            "_sourceT", samples[int(selected)]["t"]
-                        )
+                _, geometry, peak_scores = self.bundle.classification_features(samples)
+                # Peak is an observed projected trajectory extremum, not the
+                # time of maximum network confidence or inferred impact.
+                points = geometry[:, h]
+                finite = self.bundle.np.isfinite(points).all(1) & (
+                    peak_scores[:, [2 + h, 4 + h]].min(1) >= 0.55
+                )
+                if state["label"] == 1:
+                    # A learned straight label still needs an observed extension.
+                    # Use the same peak shape as geometric straight proposals;
+                    # prominence is deliberately not required here.
+                    finite &= (
+                        (points[:, 4] >= 0.55)
+                        & (points[:, 5] >= 100)
+                        & (points[:, 1] <= 0.65)
+                    )
+                if finite.any():
+                    ids = self.bundle.np.flatnonzero(finite)
+                    if state["label"] == 3:
+                        selected = ids[points[ids, 1].argmin()]
+                    elif state["label"] == 1:
+                        selected = ids[points[ids, 4].argmax()]
                     else:
-                        self.curves[h] = None
+                        motion = self.bundle.np.linalg.norm(
+                            points[ids, :2] - points[ids[0], :2], axis=1
+                        )
+                        selected = ids[motion.argmax()]
+                    peak = samples[int(selected)].get(
+                        "_sourceT", samples[int(selected)]["t"]
+                    )
+                else:
+                    self.curves[h] = None
+                    continue
+                intervals = [(state["sourceStart"], peak, state["sourceLast"])]
+                if state["label"] == 1:
+                    # Same-family fast repeats need an observed return trough,
+                    # not a change in the family's neural label.
+                    observed = []
+                    previous = None
+                    for sample in samples:
+                        source_t = sample.get("_sourceT", sample["t"])
+                        if source_t != previous:
+                            observed.append({**sample, "t": source_t})
+                            previous = source_t
+                    _, raw_points, raw_scores = self.bundle.classification_features(
+                        observed
+                    )
+                    valid_points = self.bundle.np.isfinite(raw_points[:, h]).all(1) & (
+                        raw_scores[:, [h, 2 + h, 4 + h]].min(1) >= 0.55
+                    )
+                    ids = self.bundle.np.flatnonzero(valid_points)
+                    if len(ids) >= 5:
+                        reach = raw_points[ids, h, 4]
+                        peaks, _ = self.bundle.signal.find_peaks(reach, prominence=0.20)
+                        peaks = [
+                            int(v)
+                            for v in peaks
+                            if raw_points[ids[v], h, 5] >= 100
+                            and raw_points[ids[v], h, 4] >= 0.55
+                            and raw_points[ids[v], h, 1] <= 0.65
+                        ]
+                        selected = []
+                        for v in sorted(peaks, key=lambda v: reach[v], reverse=True):
+                            if all(
+                                abs(observed[ids[v]]["t"] - observed[ids[q]]["t"])
+                                >= 180
+                                for q in selected
+                            ):
+                                selected.append(v)
+                        selected.sort()
+                        if len(selected) >= 2 and all(
+                            observed[ids[k + 1]]["t"] - observed[ids[k]]["t"] <= 100
+                            for k in range(selected[0], selected[-1])
+                        ):
+                            valleys = [
+                                int(a + self.bundle.np.argmin(reach[a : b + 1]))
+                                for a, b in zip(selected, selected[1:])
+                            ]
+                            bounds = (
+                                [state["sourceStart"]]
+                                + [observed[ids[v]]["t"] for v in valleys]
+                                + [state["sourceLast"]]
+                            )
+                            intervals = [
+                                (bounds[k], observed[ids[v]]["t"], bounds[k + 1])
+                                for k, v in enumerate(selected)
+                            ]
+                for start, peak, end in intervals:
+                    if end - start < 66:
                         continue
                     self.pending.append(
                         {
                             "hand": hand,
-                            "family": "hook" if state["label"] == 2 else "uppercut",
-                            "startMs": state["sourceStart"],
+                            "family": {1: "straight", 2: "hook", 3: "uppercut"}[
+                                state["label"]
+                            ],
+                            "startMs": start,
                             "peakMs": peak,
-                            "endMs": state["sourceLast"],
+                            "endMs": end,
                             "score": state["score"],
+                            "_proposal": "temporal",
                             "_ready": max(t, state["last"] + LOOKAHEAD_MS),
                         }
                     )
@@ -462,12 +570,36 @@ class RecognizerSession:
             self.next_tick += 1000 / 30
         self.grid = [value for value in self.grid if t - value["t"] <= HISTORY_MS]
         if added:
-            probabilities, valid = self.bundle.temporal_probabilities(self.grid)
-            for i, value in enumerate(added, start=len(self.grid) - len(added)):
+            context = self.grid[-(31 + len(added)) :]
+            probabilities, valid = self.bundle.temporal_probabilities(context)
+            for i, value in enumerate(added, start=len(context) - len(added)):
+                self.predictions.append(
+                    {
+                        "t": value["t"],
+                        "sourceT": value.get("_sourceT", value["t"]),
+                        "p": probabilities[:, :, i].copy(),
+                        "valid": valid[:, i].copy(),
+                    }
+                )
                 self._curves_at(probabilities[:, :, i], valid[:, i], value)
-        if len(self.raw) >= 25 and self.counter % 3 == 0:
+            self.predictions = [p for p in self.predictions if t - p["t"] <= HISTORY_MS]
+        if len(self.raw) >= 12 and t - self.last_proposal_t >= 66:
+            self.last_proposal_t = t
             for event in self.bundle.straight_proposals(self.raw):
-                if not 800 <= t - event["peakMs"] <= 1100:
+                h = 0 if event["hand"] == "left" else 1
+                support = [
+                    p["p"][h]
+                    for p in self.predictions
+                    if event["startMs"] <= p["sourceT"] <= event["endMs"]
+                    and p["valid"][h]
+                ]
+                if not support or self.bundle.np.mean(support, axis=0)[1] < 0.5:
+                    continue
+                if (
+                    t - event["endMs"] < 66
+                    or t - event["peakMs"] < 150
+                    or t - event["peakMs"] > 1800
+                ):
                     continue
                 if self.raw[0]["t"] > 0 and event["startMs"] < self.raw[0]["t"] + 550:
                     continue
@@ -479,22 +611,30 @@ class RecognizerSession:
                     continue
                 self.seen_straights.append(event)
                 self.pending.append(
-                    {**event, "_ready": max(t, event["endMs"] + LOOKAHEAD_MS)}
+                    {
+                        **event,
+                        "_proposal": "geometry",
+                        "_ready": max(t, event["endMs"] + LOOKAHEAD_MS),
+                    }
                 )
         events = []
         for event in sorted(
             self.pending,
-            key=lambda value: (value["family"] != "straight", value["startMs"]),
+            key=lambda value: (value.get("_proposal") != "geometry", value["startMs"]),
         ):
             if event["_ready"] > t:
                 continue
             overlaps = lambda other: event["hand"] == other["hand"] and min(
                 event["endMs"], other["endMs"]
             ) > max(event["startMs"], other["startMs"])
-            if event["family"] != "straight" and any(
-                overlaps(other)
-                for other in self.accepted + self.pending
-                if other is not event and other["family"] == "straight"
+            if (
+                event.get("_proposal") == "temporal"
+                and event["family"] == "straight"
+                and any(
+                    overlaps(other)
+                    for other in self.accepted + self.pending
+                    if other is not event and other.get("_proposal") == "geometry"
+                )
             ):
                 continue
             if any(
@@ -509,12 +649,12 @@ class RecognizerSession:
             }
             emitted.update(
                 {
-                    "id": f"{self.epoch}-{event['hand']}-{event['family']}-{event['startMs']:.3f}",
+                    "id": f"{self.epoch}-{event['hand']}-{event['family']}-{event['startMs']:.3f}-{event['peakMs']:.3f}",
                     "detectedAtMs": t,
                 }
             )
             events.append(emitted)
-            self.accepted.append(emitted)
+            self.accepted.append({**emitted, "_proposal": event.get("_proposal")})
         self.pending = [event for event in self.pending if event["_ready"] > t]
         self.accepted = [
             event for event in self.accepted if t - event["endMs"] <= HISTORY_MS

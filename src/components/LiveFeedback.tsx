@@ -17,7 +17,7 @@ export function recentDetection(
   return Number.isFinite(detectedAt) &&
     detectedAt >= 0 &&
     age >= -150 &&
-    age <= 2000
+    age <= 3500
     ? event
     : null;
 }
@@ -32,8 +32,17 @@ export function LiveFeedback({
   trackingUnclear: boolean;
 }) {
   const event = recentDetection(events, elapsedMs);
+  const emittedAt = event?.detectedAtMs ?? event?.endMs ?? NaN;
+  const justDetected = event && elapsedMs - emittedAt <= 900;
+  const batchSize = justDetected
+    ? events.filter((item) => (item.detectedAtMs ?? item.endMs) === emittedAt)
+        .length
+    : 0;
   return (
-    <div className="live-feedback" aria-label="Live punch feedback">
+    <div
+      className={`live-feedback ${event ? `hand-${event.hand}` : ""}`}
+      aria-label="Live punch feedback"
+    >
       <div
         className="live-punch"
         role="status"
@@ -42,10 +51,15 @@ export function LiveFeedback({
       >
         <span className="live-eyebrow">
           {event
-            ? "Last detected"
+            ? "● Detected"
             : trackingUnclear
               ? "Round continues"
               : "Your round"}
+          {justDetected && (
+            <span className="detection-tick" key={event.id} aria-hidden="true">
+              +{batchSize}
+            </span>
+          )}
         </span>
         <strong
           className={

@@ -170,10 +170,12 @@ test("demo round opens review, survives export and reload, and permits annotatio
   await page.getByText("Label this round (optional)", { exact: true }).click();
   await page
     .getByLabel("Annotation action", { exact: true })
-    .selectOption("other");
+    .getByRole("button", { name: "other", exact: true })
+    .click();
   await page
     .getByLabel("Annotation hand", { exact: true })
-    .selectOption("unknown");
+    .getByRole("button", { name: "unknown", exact: true })
+    .click();
   await page.getByLabel("Annotation start", { exact: true }).fill("0.1");
   await page.getByLabel("Annotation end", { exact: true }).fill("0.6");
   await page
@@ -615,9 +617,11 @@ test("camera round ends on time when no video frame callbacks arrive", async ({
     exact: true,
   });
   await expect(record).toBeEnabled({ timeout: 45_000 });
-  await expect(page.getByLabel("Round duration", { exact: true })).toHaveValue(
-    "30",
-  );
+  await expect(
+    page
+      .getByLabel("Round duration", { exact: true })
+      .getByRole("button", { name: "30s", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await page.clock.install();
   await record.click();
   await page.clock.fastForward(8100);
@@ -768,7 +772,7 @@ test("retained-video replay bounds native seeking and hides pose samples across 
   const tracking = page
     .locator(".review")
     .getByRole("checkbox", { name: "Show tracking", exact: true });
-  await expect(tracking).not.toBeChecked();
+  await expect(tracking).toBeChecked();
   await tracking.check();
   await expect
     .poll(() =>
@@ -836,8 +840,10 @@ test("retained-video replay bounds native seeking and hides pose samples across 
   await expect(page.locator(".replay-stage .pose-overlay")).toHaveCount(1);
   await expect(page.getByRole("status")).toHaveCount(0);
   const speed = page.getByLabel("Playback speed", { exact: true });
-  await expect(speed).toHaveValue("1");
-  await speed.selectOption("0.5");
+  await expect(
+    speed.getByRole("button", { name: "1×", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await speed.getByRole("button", { name: "0.5×", exact: true }).click();
   await expect(video).toHaveJSProperty("playbackRate", 0.5);
   await page.getByRole("button", { name: "Play replay", exact: true }).click();
   await expect(video).toHaveJSProperty("paused", false);
@@ -848,7 +854,7 @@ test("retained-video replay bounds native seeking and hides pose samples across 
   await expect(
     page.getByRole("button", { name: "Play replay", exact: true }),
   ).toBeVisible();
-  await speed.selectOption("1");
+  await speed.getByRole("button", { name: "1×", exact: true }).click();
   await expect(video).toHaveJSProperty("playbackRate", 1);
   expect(
     await page.evaluate(
@@ -917,15 +923,17 @@ test("motion-only replay supports half speed and frame stepping pauses playback"
   await expect(page.locator(".replay-stage video")).toHaveCount(0);
   const speed = page.getByLabel("Playback speed", { exact: true });
   const position = page.getByLabel("Replay position", { exact: true });
-  await expect(speed).toHaveValue("1");
-  await speed.selectOption("0.5");
+  await expect(
+    speed.getByRole("button", { name: "1×", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await speed.getByRole("button", { name: "0.5×", exact: true }).click();
   await page.clock.install();
   await page.getByRole("button", { name: "Play replay", exact: true }).click();
   await page.clock.runFor(1000);
   const halfSpeedTime = Number(await position.inputValue());
   expect(halfSpeedTime).toBeGreaterThanOrEqual(480);
   expect(halfSpeedTime).toBeLessThanOrEqual(520);
-  await speed.selectOption("1");
+  await speed.getByRole("button", { name: "1×", exact: true }).click();
   await page.clock.runFor(1000);
   const normalSpeedTime = Number(await position.inputValue());
   expect(normalSpeedTime - halfSpeedTime).toBeGreaterThanOrEqual(960);
@@ -939,9 +947,11 @@ test("motion-only replay supports half speed and frame stepping pauses playback"
   const pausedAt = await position.inputValue();
   await page.clock.runFor(1000);
   await expect(position).toHaveValue(pausedAt);
-  await speed.selectOption("0.5");
+  await speed.getByRole("button", { name: "0.5×", exact: true }).click();
   await page.locator(".round-library .session-item").last().click();
-  await expect(speed).toHaveValue("1");
+  await expect(
+    speed.getByRole("button", { name: "1×", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(position).toHaveValue("0");
 });
 
@@ -1061,7 +1071,7 @@ test("detection recheck is temporary and exports separately from original eviden
   ).toHaveCount(0);
   await expect(
     page.getByRole("checkbox", { name: "Show detections", exact: true }),
-  ).not.toBeChecked();
+  ).toBeChecked();
   await page
     .getByRole("checkbox", { name: "Show detections", exact: true })
     .check();
@@ -1071,7 +1081,7 @@ test("detection recheck is temporary and exports separately from original eviden
   await page.locator(".round-library .session-item").first().click();
   await expect(
     page.getByRole("checkbox", { name: "Show detections", exact: true }),
-  ).not.toBeChecked();
+  ).toBeChecked();
   await page
     .getByRole("checkbox", { name: "Show detections", exact: true })
     .check();
@@ -1212,4 +1222,98 @@ test("a late in-flight camera frame stays inside the frozen media duration", asy
   expect(saved.frames[0].t).toBeCloseTo(30_015);
   expect(saved.durationMs).toBeGreaterThanOrEqual(saved.frames[0].t);
   expect(saved.durationMs).toBeLessThan(30_200);
+});
+
+test("every consecutive 20 Hz pose result reaches the visible skeleton", async ({
+  page,
+}) => {
+  // Exercise the real capture pump and useStudio receive path. Only inference
+  // is synthetic; there is no physical camera, GPU model or local service.
+  await page.route("**/src/lib/vision.ts*", (route) =>
+    route.fulfill({
+      contentType: "application/javascript",
+      body: `export class VisionRunner {
+      delegate='CPU'; modelInfo=null;
+      async init(){}
+      async detectImage(_image,t){
+        const index=window.__poseResults.length;
+        const frame=structuredClone(window.__poseFixture);
+        frame.t=t;frame.landmarks[15].x=.30+index*.015;
+        window.__poseResults.push({t,at:performance.now(),x:frame.landmarks[15].x});
+        return frame;
+      }
+      dispose(){}
+    }`,
+    }),
+  );
+  await page.addInitScript(
+    (frame) => {
+      const state = window as any;
+      state.__poseFixture = frame;
+      state.__poseResults = [];
+      state.__poseCallback = null;
+      HTMLVideoElement.prototype.requestVideoFrameCallback = (callback) => {
+        state.__poseCallback = callback;
+        return 1;
+      };
+      HTMLVideoElement.prototype.cancelVideoFrameCallback = () => {
+        state.__poseCallback = null;
+      };
+      navigator.mediaDevices.getUserMedia = async () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = frame.width;
+        canvas.height = frame.height;
+        canvas.getContext("2d")!.fillRect(0, 0, canvas.width, canvas.height);
+        state.__poseStream = canvas.captureStream(20);
+        return state.__poseStream;
+      };
+    },
+    { ...demoFrame(0), width: 640, height: 360 },
+  );
+  await page.goto(APP_ORIGIN);
+  await page
+    .getByRole("button", { name: "Enable camera", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Record round", exact: true }),
+  ).toBeEnabled();
+  await page.clock.install({ time: new Date("2030-01-01T00:00:00Z") });
+  await page.clock.pauseAt(new Date("2030-01-01T00:00:01Z"));
+  const wrist = page.locator(
+    ".camera-stage circle.pose-joint.hand-left[r='9']",
+  );
+  for (let index = 0; index < 8; index++) {
+    await page.clock.runFor(50);
+    await page.evaluate((index) => {
+      (window as any).__poseCallback(performance.now(), {
+        mediaTime: 1 + index * 0.05,
+      });
+    }, index);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__poseResults.length))
+      .toBe(index + 1);
+    // This waits for a real React/SVG commit, not merely an inference callback.
+    // With the former 65ms gate the second 50ms observation never appears.
+    await expect
+      .poll(async () => Number(await wrist.getAttribute("cx")), {
+        timeout: 2000,
+      })
+      .toBeCloseTo((0.3 + index * 0.015) * 640, 6);
+  }
+  const observed = await page.evaluate(
+    () =>
+      (window as any).__poseResults as { t: number; at: number; x: number }[],
+  );
+  expect(observed).toHaveLength(8);
+  for (let index = 1; index < observed.length; index++) {
+    expect(observed[index].at - observed[index - 1].at).toBeCloseTo(50, 5);
+    expect(observed[index].t - observed[index - 1].t).toBeCloseTo(50, 5);
+  }
+  await page.getByRole("button", { name: "Stop camera", exact: true }).click();
+  await expect(page.locator(".camera-stage .pose-overlay")).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => (window as any).__poseStream.getVideoTracks()[0].readyState,
+    ),
+  ).toBe("ended");
 });

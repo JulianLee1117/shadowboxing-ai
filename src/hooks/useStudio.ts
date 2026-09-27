@@ -122,6 +122,7 @@ export function useStudio(onComplete: (session: Session) => void) {
   const lastSource = useRef(0);
   const sourceStart = useRef(0);
   const displayAt = useRef(0);
+  const statisticsAt = useRef(-Infinity);
   const fileUrl = useRef<string | null>(null);
   const sourceFile = useRef<File | null>(null);
   const finalizing = useRef<Promise<void> | null>(null);
@@ -286,6 +287,8 @@ export function useStudio(onComplete: (session: Session) => void) {
     recentTimes.current = [];
     lastMedia.current = -1;
     lastSource.current = 0;
+    displayAt.current = 0;
+    statisticsAt.current = -Infinity;
     if (mounted.current) {
       setSource(null);
       setStatus("off");
@@ -331,10 +334,14 @@ export function useStudio(onComplete: (session: Session) => void) {
         void finishRef.current();
     }
     const now = performance.now();
-    if (now - displayAt.current > 65) {
-      displayAt.current = now;
-      setFrame(next);
-      setQuality(result.quality);
+    // Every completed observation reaches the overlay. A time cutoff here
+    // discards alternating results when inference runs at 20–25 Hz.
+    displayAt.current = now;
+    setFrame(next);
+    setQuality(result.quality);
+    // Numeric telemetry can update less often without holding back the pose.
+    if (now - statisticsAt.current >= 100) {
+      statisticsAt.current = now;
       setFps(
         times.length > 1
           ? (times.length - 1) / ((times.at(-1)! - times[0]) / 1000)

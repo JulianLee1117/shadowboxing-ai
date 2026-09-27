@@ -215,6 +215,7 @@ class RecognizerTests(unittest.TestCase):
             observer._curves_at(hook, [True, True], {"t": t, "_sourceT": 0})
         observer._curves_at(idle, [False, False], {"t": 100, "_sourceT": 100})
         observer._curves_at(idle, [False, False], {"t": 200, "_sourceT": 200})
+        observer._curves_at(idle, [False, False], {"t": 300, "_sourceT": 300})
         self.assertEqual(observer.pending, [])
         self.assertIsNone(observer.curves[0])
 
@@ -229,9 +230,18 @@ class RecognizerTests(unittest.TestCase):
             def any(self):
                 return False
 
+            def min(self, _):
+                return self
+
+            def __ge__(self, _):
+                return self
+
+            def __and__(self, _):
+                return self
+
         bundle = FakeBundle()
         bundle.np = SimpleNamespace(isfinite=lambda _: Nonfinite())
-        bundle.classification_features = lambda _: (None, Nonfinite(), None)
+        bundle.classification_features = lambda _: (None, Nonfinite(), Nonfinite())
         bundle.family_probabilities = lambda _: [0, 0.9, 0.1]
         observer = RecognizerSession(bundle)
         observer.grid = [{"t": t, "_sourceT": t} for t in (0, 33, 66)]
@@ -240,9 +250,64 @@ class RecognizerTests(unittest.TestCase):
         for value in observer.grid:
             observer._curves_at(hook, [True, True], value)
         for t in (100, 200):
-            observer._curves_at(idle, [False, False], {"t": t, "_sourceT": t})
+            observer._curves_at(idle, [True, True], {"t": t, "_sourceT": t})
         self.assertEqual(observer.pending, [])
         self.assertIsNone(observer.curves[0])
+
+    def test_temporal_compute_uses_receptive_tail_without_truncating_event_history(
+        self,
+    ):
+        bundle = FakeBundle()
+        lengths = []
+
+        def compute(frames):
+            lengths.append(len(frames))
+            return Matrix("probabilities"), Matrix("valid")
+
+        bundle.temporal_probabilities = compute
+        observer = RecognizerSession(bundle)
+        for t in range(0, 5000, 50):
+            observer.update(frame(t))
+        self.assertGreater(len(observer.grid), 100)
+        self.assertLessEqual(max(lengths), 33)
+
+    def test_short_uncertainty_retains_state_but_cannot_add_observations(self):
+        observer = RecognizerSession(FakeBundle())
+        hook = [Vector([0, 0, 0.99, 0.01]), Vector([1, 0, 0, 0])]
+        for t in (0, 33, 66):
+            observer._curves_at(hook, [True, True], {"t": t, "_sourceT": t})
+        count = observer.curves[0]["sourceCount"]
+        for t in (100, 200):
+            observer._curves_at(hook, [False, True], {"t": t, "_sourceT": t})
+        self.assertEqual(observer.curves[0]["sourceCount"], count)
+        self.assertEqual(observer.curves[0]["sourceLast"], 66)
+        observer._curves_at(hook, [True, True], {"t": 250, "_sourceT": 250})
+        self.assertEqual(observer.curves[0]["sourceStart"], 0)
+        observer._curves_at(hook, [False, True], {"t": 400, "_sourceT": 400})
+        observer._curves_at(hook, [True, True], {"t": 550, "_sourceT": 550})
+        self.assertEqual(observer.curves[0]["sourceStart"], 550)
+        self.assertEqual(observer.pending, [])
+
+    def test_distinct_peaks_with_shared_start_have_distinct_stable_ids(self):
+        observer = RecognizerSession(FakeBundle())
+        observer.update(frame(0))
+        for peak in (20, 260):
+            observer.pending.append(
+                {
+                    "hand": "left",
+                    "family": "straight",
+                    "startMs": 0,
+                    "peakMs": peak,
+                    "endMs": 280,
+                    "score": 0.9,
+                    "_ready": 300,
+                }
+            )
+        for t in (100, 200):
+            observer.update(frame(t))
+        events = observer.update(frame(300))["events"]
+        self.assertEqual(len(events), 2)
+        self.assertNotEqual(events[0]["id"], events[1]["id"])
 
     def test_missing_or_changed_frame_estimator_fails_explicitly(self):
         observer = RecognizerSession(FakeBundle())

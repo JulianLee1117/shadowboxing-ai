@@ -39,6 +39,10 @@ test("large live feedback and focus controls work without opening a camera", asy
     )
     .toBeGreaterThan(0);
   await expect(page.locator(".live-punch-name.detected")).toBeVisible();
+  await expect(page.locator(".detection-tick")).toHaveText("+1");
+  await expect(page.locator(".live-feedback")).toHaveClass(/hand-(left|right)/);
+  await expect(page.locator(".camera-stage .pose-overlay")).toBeVisible();
+  await expect(page.locator("select, details")).toHaveCount(0);
   await expect(page.locator(".live-punch-identity")).toHaveText(
     /^(Left|Right) hand · (Lead|Rear)$/,
   );
@@ -55,7 +59,11 @@ test("large live feedback and focus controls work without opening a camera", asy
     page.getByRole("heading", { name: "Review", exact: true }),
   ).toBeVisible();
   await expect(page.locator(".practice-arena")).not.toHaveClass(/is-focused/);
-  expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+  // React can remove focus layout before the browser completes native exit.
+  // Keep the cleanup requirement, but observe the asynchronous fullscreen API.
+  await expect
+    .poll(() => page.evaluate(() => document.fullscreenElement === null))
+    .toBe(true);
   expect(
     await page.evaluate(
       () => (window as typeof window & { cameraCalls: number }).cameraCalls,

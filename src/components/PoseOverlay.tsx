@@ -1,10 +1,6 @@
 import type { PoseFrame } from "../lib/types";
-import { assessArmTracking, MOTION_LIMITS } from "../lib/motion";
-import {
-  observedPoint,
-  observationScore,
-  observationThreshold,
-} from "../lib/poseConfidence";
+import { MOTION_LIMITS } from "../lib/motion";
+import { observationScore, observationThreshold } from "../lib/poseConfidence";
 
 const edges = [
   [11, 12],
@@ -32,7 +28,6 @@ export function PoseOverlay({
   silhouette?: boolean;
 }) {
   if (!frame) return null;
-  const tracking = assessArmTracking(frame);
   const uncertain = (i: number) => {
     const p = frame.landmarks[i];
     if (
@@ -40,13 +35,31 @@ export function PoseOverlay({
       observationThreshold(frame, MOTION_LIMITS.minimumVisibility)
     )
       return true;
-    if ([11, 13, 15].includes(i)) return !tracking.left.assessable;
-    if ([12, 14, 16].includes(i)) return !tracking.right.assessable;
+    if (
+      !frame.estimator &&
+      p?.presence !== undefined &&
+      (!Number.isFinite(p.presence) || p.presence < 0.5)
+    )
+      return true;
     return false;
   };
   const point = (i: number) => {
     const p = frame.landmarks[i];
-    return observedPoint(frame, p, 0.5) ? p : null;
+    // Visualization has a lower floor than recognition. Show weak observed
+    // coordinates as uncertain; never fill missing joints or change evidence.
+    const displayFloor = frame.estimator ? 0.2 : 0.3;
+    return p &&
+      Number.isFinite(p.x) &&
+      Number.isFinite(p.y) &&
+      p.x >= 0 &&
+      p.x <= 1 &&
+      p.y >= 0 &&
+      p.y <= 1 &&
+      observationScore(frame, p) >= displayFloor &&
+      (p.presence === undefined ||
+        (Number.isFinite(p.presence) && p.presence >= 0.3))
+      ? p
+      : null;
   };
   return (
     <svg
@@ -78,7 +91,7 @@ export function PoseOverlay({
               y2={q.y * frame.height}
             />
             <line
-              className={`pose-line ${a % 2 ? "lead" : "rear"} ${uncertain(a) || uncertain(b) ? "uncertain" : ""}`}
+              className={`pose-line ${a % 2 === b % 2 ? (a % 2 ? "hand-left" : "hand-right") : "body"} ${uncertain(a) || uncertain(b) ? "uncertain" : ""}`}
               x1={p.x * frame.width}
               y1={p.y * frame.height}
               x2={q.x * frame.width}
@@ -95,7 +108,7 @@ export function PoseOverlay({
             cx={p.x * frame.width}
             cy={p.y * frame.height}
             r={i === 15 || i === 16 ? 9 : 5}
-            className={`pose-joint ${i % 2 ? "lead" : "rear"} ${uncertain(i) ? "uncertain" : ""}`}
+            className={`pose-joint ${i % 2 ? "hand-left" : "hand-right"} ${uncertain(i) ? "uncertain" : ""}`}
           />
         ) : null;
       })}
@@ -105,7 +118,10 @@ export function PoseOverlay({
           <text
             key={`label-${i}`}
             transform={`translate(${p.x * frame.width} ${p.y * frame.height - 20}) scale(${mirror ? -1 : 1} 1)`}
-            fill={uncertain(i) ? "#efbf83" : "#eff9e1"}
+            fill={uncertain(i) ? "#ffd28c" : i === 15 ? "#80d8ff" : "#ffac75"}
+            stroke="#101820"
+            strokeWidth="3"
+            paintOrder="stroke"
             textAnchor="middle"
             fontSize="18"
             fontFamily="monospace"
