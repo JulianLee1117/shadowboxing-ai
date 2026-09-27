@@ -5,13 +5,15 @@ const DB_NAME = "corner-local-v1";
 function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     let abandoned = false;
-    const request = indexedDB.open(DB_NAME, 2);
+    const request = indexedDB.open(DB_NAME, 3);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains("sessions"))
         db.createObjectStore("sessions", { keyPath: "id" });
       if (!db.objectStoreNames.contains("analyses"))
         db.createObjectStore("analyses", { keyPath: "sourceSessionId" });
+      if (!db.objectStoreNames.contains("trash"))
+        db.createObjectStore("trash", { keyPath: "id" });
     };
     request.onsuccess = () => {
       if (abandoned) {
@@ -33,50 +35,186 @@ function database(): Promise<IDBDatabase> {
       );
   });
 }
-async function transaction<T>(
-  mode: IDBTransactionMode,
-  op: (store: IDBObjectStore) => IDBRequest<T>,
-): Promise<T> {
-  const db = await database();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("sessions", mode);
-    const request = op(tx.objectStore("sessions"));
-    tx.oncomplete = () => {
-      resolve(request.result);
-      db.close();
-    };
-    tx.onerror = tx.onabort = () => {
-      reject(
-        new Error(
-          "Could not save locally. Storage may be full; export your round before closing.",
-        ),
-      );
-      db.close();
-    };
-  });
+/** A small tombstone keeps the original video, evidence and report recoverable. */
+export interface TrashedRound {
+  id: string;
+  deletedAt: string;
+  createdAt: string;
+  durationMs: number;
+  eventCount: number;
+  hasVideo: boolean;
 }
-export async function saveSession(session: Session) {
-  await transaction("readwrite", (store) => store.put(session));
-}
-export async function listSessions(): Promise<Session[]> {
-  const all = await transaction<Session[]>("readonly", (store) =>
-    store.getAll(),
-  );
-  return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-export async function deleteSession(id: string) {
+export async function saveSession(
+  session: Session,
+  options: { requireExisting?: boolean } = {},
+) {
   const db = await database();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(["sessions", "analyses"], "readwrite");
-    tx.objectStore("sessions").delete(id);
-    tx.objectStore("analyses").delete(id);
+    const tx = db.transaction(["sessions", "trash"], "readwrite");
+    const exists = tx.objectStore("sessions").getKey(session.id);
+    const removed = tx.objectStore("trash").getKey(session.id);
+    let inTrash = false;
+    let missing = false;
+    removed.onsuccess = () => {
+      if (removed.result !== undefined) {
+        inTrash = true;
+        tx.abort();
+      } else if (options.requireExisting && exists.result === undefined) {
+        // An annotation edit in a stale tab must not recreate a purged video.
+        missing = true;
+        tx.abort();
+      } else tx.objectStore("sessions").put(session);
+    };
     tx.oncomplete = () => {
       db.close();
       resolve();
     };
     tx.onerror = tx.onabort = () => {
       db.close();
-      reject(new Error("Could not delete this round. Please retry."));
+      reject(
+        new Error(
+          inTrash
+            ? "Restore this round from Recently deleted before editing it."
+            : missing
+              ? "This round was deleted in another tab. Export your edits before closing."
+              : "Could not save locally. Storage may be full; export your round before closing.",
+        ),
+      );
+    };
+  });
+}
+export async function listSessions(): Promise<Session[]> {
+  const db = await database();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(["sessions", "trash"], "readonly");
+    const sessions = tx.objectStore("sessions").getAll();
+    const removed = tx.objectStore("trash").getAllKeys();
+    tx.oncomplete = () => {
+      const ids = new Set(removed.result);
+      db.close();
+      resolve(
+        (sessions.result as Session[])
+          .filter((session) => !ids.has(session.id))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      );
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(new Error("Could not load saved rounds."));
+    };
+  });
+}
+export async function listTrashedRounds(): Promise<TrashedRound[]> {
+  const db = await database();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("trash", "readonly");
+    const request = tx.objectStore("trash").getAll();
+    tx.oncomplete = () => {
+      db.close();
+      resolve(
+        (request.result as TrashedRound[]).sort((a, b) =>
+          b.deletedAt.localeCompare(a.deletedAt),
+        ),
+      );
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(new Error("Could not load Recently deleted."));
+    };
+  });
+}
+export async function moveSessionToTrash(id: string): Promise<TrashedRound> {
+  const db = await database();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(["sessions", "trash"], "readwrite");
+    const request = tx.objectStore("sessions").get(id);
+    let entry: TrashedRound | undefined;
+    request.onsuccess = () => {
+      const session = request.result as Session | undefined;
+      if (!session) {
+        tx.abort();
+        return;
+      }
+      entry = {
+        id,
+        deletedAt: new Date().toISOString(),
+        createdAt: session.createdAt,
+        durationMs: session.durationMs,
+        eventCount: session.events.length,
+        hasVideo: !!session.video,
+      };
+      tx.objectStore("trash").put(entry);
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve(entry!);
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(
+        new Error(
+          "Could not remove this round. Make sure it has finished saving, then retry.",
+        ),
+      );
+    };
+  });
+}
+export async function restoreSession(id: string): Promise<Session> {
+  const db = await database();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(["sessions", "trash"], "readwrite");
+    const request = tx.objectStore("sessions").get(id);
+    request.onsuccess = () => {
+      if (!request.result) {
+        tx.abort();
+        return;
+      }
+      tx.objectStore("trash").delete(id);
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve(request.result as Session);
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(
+        new Error(
+          "Could not restore this round. Its saved evidence may no longer be available.",
+        ),
+      );
+    };
+  });
+}
+/** Permanent deletion is only allowed from Recently deleted, after UI confirmation. */
+export async function deleteSession(id: string) {
+  const db = await database();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(["sessions", "analyses", "trash"], "readwrite");
+    const removed = tx.objectStore("trash").getKey(id);
+    let notRemoved = false;
+    removed.onsuccess = () => {
+      if (removed.result === undefined) {
+        notRemoved = true;
+        tx.abort();
+        return;
+      }
+      tx.objectStore("sessions").delete(id);
+      tx.objectStore("analyses").delete(id);
+      tx.objectStore("trash").delete(id);
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(
+        new Error(
+          notRemoved
+            ? "Move this round to Recently deleted before deleting it permanently."
+            : "Could not delete this round. Please retry.",
+        ),
+      );
     };
   });
 }
@@ -87,11 +225,12 @@ export async function loadRoundAnalysis(
 ): Promise<RoundAnalysisReport | undefined> {
   const db = await database();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction("analyses", "readonly");
+    const tx = db.transaction(["analyses", "trash"], "readonly");
     const request = tx.objectStore("analyses").get(id);
+    const removed = tx.objectStore("trash").getKey(id);
     tx.oncomplete = () => {
       db.close();
-      resolve(request.result);
+      resolve(removed.result === undefined ? request.result : undefined);
     };
     tx.onerror = tx.onabort = () => {
       db.close();
@@ -107,12 +246,15 @@ export async function saveRoundAnalysis(
   return new Promise((resolve, reject) => {
     // Check existence and write in one transaction: a completed background job
     // must never resurrect analysis after its round was deleted elsewhere.
-    const tx = db.transaction(["sessions", "analyses"], "readwrite");
+    const tx = db.transaction(["sessions", "analyses", "trash"], "readwrite");
     const exists = tx.objectStore("sessions").getKey(report.sourceSessionId);
+    const removed = tx.objectStore("trash").getKey(report.sourceSessionId);
     let missing = false;
-    exists.onsuccess = () => {
-      if (exists.result === undefined) {
-        missing = true;
+    let inTrash = false;
+    removed.onsuccess = () => {
+      if (exists.result === undefined || removed.result !== undefined) {
+        missing = exists.result === undefined;
+        inTrash = removed.result !== undefined;
         tx.abort();
       } else tx.objectStore("analyses").put(report);
     };
@@ -124,9 +266,11 @@ export async function saveRoundAnalysis(
       db.close();
       reject(
         new Error(
-          missing
-            ? "Save the original round before saving its analysis."
-            : "Analysis could not be saved. Export it before closing.",
+          inTrash
+            ? "This round is in Recently deleted. Restore it before saving analysis."
+            : missing
+              ? "Save the original round before saving its analysis."
+              : "Analysis could not be saved. Export it before closing.",
         ),
       );
     };

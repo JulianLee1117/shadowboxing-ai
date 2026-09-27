@@ -46,11 +46,14 @@ function App() {
   const [sound, setSound] = useState(true);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<Session | null>(null);
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const [notice, setNotice] = useState<string | null>(null);
   const [saveStates, setSaveStates] = useState<
     Record<string, "saving" | "saved" | "error">
   >({});
   const saveRevisions = useRef<Record<string, number>>({});
+  const persistedIds = useRef(new Set<string>());
   const [finishing, setFinishing] = useState(false);
   const gate = useRef(new ReadinessGate());
   const [readiness, setReadiness] = useState(() => gate.current.cancel());
@@ -59,24 +62,28 @@ function App() {
   const lastBeep = useRef(-1);
   const arenaRef = useRef<HTMLDivElement>(null);
   const wasFullscreen = useRef(false);
-  const persist = useCallback(async (session: Session) => {
-    const revision = (saveRevisions.current[session.id] ?? 0) + 1;
-    saveRevisions.current[session.id] = revision;
-    setSaveStates((old) => ({ ...old, [session.id]: "saving" }));
-    try {
-      await saveSession(session);
-      if (saveRevisions.current[session.id] === revision)
-        setSaveStates((old) => ({ ...old, [session.id]: "saved" }));
-    } catch (e) {
-      if (saveRevisions.current[session.id] !== revision) return;
-      setSaveStates((old) => ({ ...old, [session.id]: "error" }));
-      setNotice(
-        e instanceof Error
-          ? e.message
-          : "Could not save. Export this round before closing.",
-      );
-    }
-  }, []);
+  const persist = useCallback(
+    async (session: Session, requireExisting = false) => {
+      const revision = (saveRevisions.current[session.id] ?? 0) + 1;
+      saveRevisions.current[session.id] = revision;
+      setSaveStates((old) => ({ ...old, [session.id]: "saving" }));
+      try {
+        await saveSession(session, { requireExisting });
+        persistedIds.current.add(session.id);
+        if (saveRevisions.current[session.id] === revision)
+          setSaveStates((old) => ({ ...old, [session.id]: "saved" }));
+      } catch (e) {
+        if (saveRevisions.current[session.id] !== revision) return;
+        setSaveStates((old) => ({ ...old, [session.id]: "error" }));
+        setNotice(
+          e instanceof Error
+            ? e.message
+            : "Could not save. Export this round before closing.",
+        );
+      }
+    },
+    [],
+  );
 
   const onComplete = useCallback(
     (session: Session) => {
@@ -156,12 +163,13 @@ function App() {
 
   useEffect(() => {
     void listSessions()
-      .then((saved) =>
+      .then((saved) => {
+        for (const session of saved) persistedIds.current.add(session.id);
         setSessions((current) => [
           ...current,
           ...saved.filter((s) => !current.some((c) => c.id === s.id)),
-        ]),
-      )
+        ]);
+      })
       .catch((e: Error) => setNotice(e.message));
     return () => {
       void audio.current?.close();
@@ -271,7 +279,7 @@ function App() {
   const updateSession = async (session: Session) => {
     setSelected(session);
     setSessions((old) => old.map((s) => (s.id === session.id ? session : s)));
-    await persist(session);
+    await persist(session, persistedIds.current.has(session.id));
   };
   const tracking = studio.frame ? assessArmTracking(studio.frame) : null;
   const active = studio.running || readiness.pending || finishing;
@@ -637,11 +645,29 @@ function App() {
             saveState={
               selected ? (saveStates[selected.id] ?? "saved") : "saved"
             }
+            unsavedIds={Object.keys(saveStates).filter(
+              (id) => saveStates[id] !== "saved",
+            )}
             onSelect={setSelected}
             onUpdate={updateSession}
             onDeleted={(id) => {
               setSessions((old) => old.filter((s) => s.id !== id));
-              setSelected(null);
+              setSelected((current) =>
+                current?.id === id
+                  ? (sessionsRef.current.find((session) => session.id !== id) ??
+                    null)
+                  : current,
+              );
+            }}
+            onRestored={(session) => {
+              persistedIds.current.add(session.id);
+              setSaveStates((old) => ({ ...old, [session.id]: "saved" }));
+              setSessions((old) =>
+                [session, ...old.filter((item) => item.id !== session.id)].sort(
+                  (a, b) => b.createdAt.localeCompare(a.createdAt),
+                ),
+              );
+              setSelected(session);
             }}
             onNotice={setNotice}
             onPractice={() => void navigate("practice")}

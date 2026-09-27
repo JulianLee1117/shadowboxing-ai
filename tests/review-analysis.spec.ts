@@ -33,7 +33,7 @@ const studio={videoRef:{current:null},status:'off',source:'camera',running:false
 export function useStudio(onComplete){window.__completeRound=onComplete;return studio;}
 `;
 
-async function setup(page: Page, count = 1) {
+async function setup(page: Page, count = 1, version: 1 | 2 = 1) {
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (url.origin !== origin) return route.abort();
@@ -103,29 +103,50 @@ async function setup(page: Page, count = 1) {
     };
   });
   await page.goto(`${origin}/__lifecycle_seed`);
-  await page.evaluate(async (count) => {
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open("corner-local-v1", 1);
-      request.onupgradeneeded = () =>
-        request.result.createObjectStore("sessions", { keyPath: "id" });
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const db = request.result,
-          tx = db.transaction("sessions", "readwrite");
-        for (let i = 0; i < count; i++)
-          tx.objectStore("sessions").put(
-            (window as any).__makeSession(
-              `original-${i}`,
-              `2026-01-0${i + 1}T00:00:00.000Z`,
-            ),
-          );
-        tx.oncomplete = () => {
-          db.close();
-          resolve();
+  await page.evaluate(
+    async ({ count, version }) => {
+      const sessions = Array.from({ length: count }, (_, i) =>
+        (window as any).__makeSession(
+          `original-${i}`,
+          new Date(Date.UTC(2026, 0, i + 1)).toISOString(),
+        ),
+      );
+      let savedReport: any;
+      if (version === 2) {
+        const path = "/src/lib/roundAnalysis.ts";
+        const { analyzeRound } = await import(path);
+        const pending = analyzeRound(sessions[0], {});
+        await (window as any).__analysisJobs[0].complete();
+        savedReport = await pending;
+      }
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("corner-local-v1", version);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore("sessions", { keyPath: "id" });
+          if (version === 2)
+            request.result.createObjectStore("analyses", {
+              keyPath: "sourceSessionId",
+            });
         };
-      };
-    });
-  }, count);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result,
+            tx = db.transaction(
+              version === 2 ? ["sessions", "analyses"] : ["sessions"],
+              "readwrite",
+            );
+          for (const session of sessions)
+            tx.objectStore("sessions").put(session);
+          if (savedReport) tx.objectStore("analyses").put(savedReport);
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+        };
+      });
+    },
+    { count, version },
+  );
   await page.goto(origin);
   await expect(
     page.getByRole("button", { name: /^Saved rounds/ }),
@@ -155,7 +176,7 @@ async function dbState(page: Page) {
     });
     const version = db.version;
     const values = await Promise.all(
-      ["sessions", "analyses"].map(
+      ["sessions", "analyses", "trash"].map(
         (name) =>
           new Promise<any[]>((resolve, reject) => {
             const tx = db.transaction(name);
@@ -168,12 +189,18 @@ async function dbState(page: Page) {
     db.close();
     return {
       version,
-      sessions: values[0].map((s) => ({
-        ...s,
-        videoBytes: s.video.size,
-        video: undefined,
-      })),
+      sessions: await Promise.all(
+        values[0].map(async (s) => ({
+          ...s,
+          videoBytes: s.video.size,
+          videoContents: Array.from(
+            new Uint8Array(await s.video.arrayBuffer()),
+          ),
+          video: undefined,
+        })),
+      ),
       analyses: values[1],
+      trash: values[2],
     };
   });
 }
@@ -189,7 +216,7 @@ test("v1 migration preserves originals; separate analysis and focus survive relo
 }) => {
   await setup(page);
   const before = await dbState(page);
-  expect(before.version).toBe(2);
+  expect(before.version).toBe(3);
   expect(before.analyses).toEqual([]);
   await openReview(page);
   await page.locator(".replay-stage video").evaluate((video) => {
@@ -321,22 +348,121 @@ test("cancel, round switch and unmount discard service results that ignore abort
   ).toBe(true);
 });
 
-test("atomic deletion removes derived analysis and refuses a late resurrection", async ({
+test("v2 migration, Undo and restore preserve original video, labels and cached analysis", async ({
   page,
 }) => {
-  await setup(page);
+  await setup(page, 1, 2);
+  const original = await dbState(page);
+  expect(original.version).toBe(3);
+  expect(original.analyses).toHaveLength(1);
+  expect(original.trash).toEqual([]);
+  await openReview(page);
+  await expect(
+    page.getByText("Round analysis ready", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /^Remove round from/ }).click();
+  await expect(page.locator(".session-item")).toHaveCount(0);
+  const removed = await dbState(page);
+  expect(removed.sessions).toEqual(original.sessions);
+  expect(removed.analyses).toEqual(original.analyses);
+  expect(removed.trash).toHaveLength(1);
+  const rejected = await page.evaluate(
+    async ({ report }) => {
+      const path = "/src/lib/storage.ts";
+      const {
+        saveRoundAnalysis,
+        saveSession,
+        listSessions,
+        loadRoundAnalysis,
+      } = await import(path);
+      const errors = [];
+      for (const operation of [
+        () => saveRoundAnalysis(report),
+        () => saveSession((window as any).__makeSession("original-0")),
+      ]) {
+        try {
+          await operation();
+        } catch (e) {
+          errors.push(String(e));
+        }
+      }
+      return {
+        errors,
+        active: await listSessions(),
+        report: await loadRoundAnalysis("original-0"),
+      };
+    },
+    { report: original.analyses[0] },
+  );
+  expect(rejected.errors).toHaveLength(2);
+  expect(
+    rejected.errors.every((error) => error.includes("Recently deleted")),
+  ).toBe(true);
+  expect(rejected.active).toEqual([]);
+  expect(rejected.report).toBeUndefined();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.locator(".session-item")).toHaveCount(1);
+  await page
+    .getByRole("button", { name: "Re-run analysis", exact: true })
+    .click();
+  await expect(
+    page.getByText("Round analysis ready", { exact: true }),
+  ).toBeVisible();
+  expect(await dbState(page)).toEqual(original);
+  await page.getByRole("button", { name: /^Remove round from/ }).click();
+  await expect(page.locator(".session-item")).toHaveCount(0);
+  await page.reload();
+  await page.getByRole("button", { name: /^Saved rounds/ }).click();
+  await expect(page.locator(".session-item")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Undo", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Recently deleted (1)", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Restore", exact: true }).click();
+  await expect(page.locator(".session-item")).toHaveCount(1);
+  await page
+    .getByRole("button", { name: "Re-run analysis", exact: true })
+    .click();
+  await expect(
+    page.getByText("Round analysis ready", { exact: true }),
+  ).toBeVisible();
+  expect(await dbState(page)).toEqual(original);
+  expect(await page.evaluate(() => (window as any).__analysisJobs.length)).toBe(
+    0,
+  );
+});
+
+test("confirmed permanent deletion removes original and analysis atomically; late jobs cannot restore it", async ({
+  page,
+}) => {
+  await setup(page, 1, 2);
+  const original = await dbState(page);
   await openReview(page);
   await page
-    .getByRole("button", { name: "Analyze recording", exact: true })
+    .getByRole("button", { name: "Analyze again", exact: true })
     .click();
+  await page.getByRole("button", { name: /^Remove round from/ }).click();
+  await expect(page.locator(".session-item")).toHaveCount(0);
+  expect(
+    await page.evaluate(() => (window as any).__analysisJobs[0].signal.aborted),
+  ).toBe(true);
   await finish(page, 0);
-  await expect.poll(async () => (await dbState(page)).analyses.length).toBe(1);
-  await page.getByText("Export & details", { exact: true }).click();
-  page.once("dialog", (d) => d.accept());
+  expect((await dbState(page)).analyses).toEqual(original.analyses);
   await page
-    .getByRole("button", { name: "Delete this round", exact: true })
+    .getByRole("button", { name: "Recently deleted (1)", exact: true })
     .click();
-  await expect(page.locator(".round-library .session-item")).toHaveCount(0);
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page
+    .getByRole("button", { name: "Delete permanently", exact: true })
+    .click();
+  expect((await dbState(page)).sessions).toEqual(original.sessions);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Delete permanently", exact: true })
+    .click();
+  await expect(page.locator(".trashed-round")).toHaveCount(0);
   const error = await page.evaluate(async () => {
     const path = "/src/lib/storage.ts";
     const { saveRoundAnalysis } = await import(path);
@@ -351,6 +477,93 @@ test("atomic deletion removes derived analysis and refuses a late resurrection",
   const state = await dbState(page);
   expect(state.sessions).toEqual([]);
   expect(state.analyses).toEqual([]);
+  expect(state.trash).toEqual([]);
+});
+
+test("an annotation edit in a stale tab cannot recreate a permanently deleted round", async ({
+  page,
+}) => {
+  await setup(page, 1, 2);
+  await openReview(page);
+  // Another connection changes storage while this tab still holds the old round.
+  await page.evaluate(async () => {
+    const path = "/src/lib/storage.ts";
+    const { moveSessionToTrash, deleteSession } = await import(path);
+    await moveSessionToTrash("original-0");
+    await deleteSession("original-0");
+  });
+  await page.getByText("Label this round (optional)", { exact: true }).click();
+  await page
+    .getByLabel("Annotation note", { exact: true })
+    .fill("Unsaved edit after external deletion");
+  await page.getByRole("button", { name: "Add label", exact: true }).click();
+  await expect(
+    page.getByText(
+      "This round was deleted in another tab. Export your edits before closing.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /^Remove round from/ }),
+  ).toBeDisabled();
+  expect((await dbState(page)).sessions).toEqual([]);
+  await page.getByText("Export & details", { exact: true }).click();
+  const evidence = await exported(page, "Evidence JSON");
+  expect(evidence.annotations).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ note: "Unsaved edit after external deletion" }),
+    ]),
+  );
+});
+
+test("saving rounds cannot be removed, and a save failure preserves the in-memory evidence", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.route("**/src/lib/storage.ts*", async (route) => {
+    if (new URL(route.request().url()).searchParams.has("unwrapped"))
+      return route.fallback();
+    return route.fulfill({
+      contentType: "text/javascript",
+      body: `
+    export * from '/src/lib/storage.ts?unwrapped';
+    import {saveSession as saveOriginal} from '/src/lib/storage.ts?unwrapped';
+    export async function saveSession(session, options) {
+      if(session.id === 'pending-save') await new Promise((resolve,reject)=>{window.__rejectSave=()=>reject(new Error('Fixture: storage full'));});
+      return saveOriginal(session, options);
+    }
+  `,
+    });
+  });
+  await page.reload();
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__completeRound(
+      w.__makeSession("pending-save", "2026-02-01T00:00:00.000Z"),
+    );
+  });
+  const pending = page.locator(".session-card").first();
+  await expect(pending.locator(".session-remove")).toBeDisabled();
+  await page.locator(".session-item").last().click();
+  await expect(pending.locator(".session-remove")).toBeDisabled();
+  await page.evaluate(() => (window as any).__rejectSave());
+  await expect(
+    page.getByText("Fixture: storage full", { exact: true }),
+  ).toBeVisible();
+  await expect(pending.locator(".session-remove")).toBeDisabled();
+  await expect(pending).toContainText("Not saved");
+  await expect(page.locator(".session-item")).toHaveCount(2);
+  await pending.locator(".session-item").click();
+  await expect(
+    page.getByText("Not saved — export before closing", { exact: true }),
+  ).toBeVisible();
+  await page.getByText("Export & details", { exact: true }).click();
+  const evidence = await exported(page, "Evidence JSON");
+  expect(evidence.id).toBe("pending-save");
+  expect(evidence.annotations[0].note).toBe("Preserve reference label");
+  expect((await dbState(page)).sessions.map((s) => s.id)).toEqual([
+    "original-0",
+  ]);
 });
 
 test("completed rounds show live results immediately and never start a second pass without a click", async ({
@@ -582,8 +795,8 @@ test("zero-length failed import is preserved without starting automatic analysis
 test("a playable recording stays mounted and visible across optional analysis and result switches", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 1512, height: 823 });
-  await setup(page);
+  await page.setViewportSize({ width: 1512, height: 768 });
+  await setup(page, 12);
   await page.evaluate(async () => {
     const canvas = document.createElement("canvas");
     canvas.width = 640;
@@ -625,6 +838,20 @@ test("a playable recording stays mounted and visible across optional analysis an
     (node as HTMLVideoElement).currentTime = 0.4;
   });
   await expect(page.getByLabel("Replay position")).toHaveValue("400");
+  await expect(page.locator(".session-item")).toHaveCount(13);
+  await expect(page.locator(".session-item").first()).toContainText(
+    "1 detected",
+  );
+  await page.locator(".session-card").nth(1).locator(".session-remove").click();
+  await expect(page.locator(".session-item")).toHaveCount(12);
+  await expect(page.getByLabel("Replay position")).toHaveValue("400");
+  expect(
+    await video.evaluate(
+      (node) =>
+        node === (window as any).__originalPlayer &&
+        (node as HTMLVideoElement).src === (window as any).__originalUrl,
+    ),
+  ).toBe(true);
   expect(await page.evaluate(() => (window as any).__analysisJobs.length)).toBe(
     0,
   );
@@ -667,14 +894,56 @@ test("a playable recording stays mounted and visible across optional analysis an
   await page.getByRole("button", { name: "Play replay", exact: true }).click();
   await expect(video).toHaveJSProperty("paused", false);
   await page.getByRole("button", { name: "Pause replay", exact: true }).click();
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  await expect(video).toBeInViewport({ ratio: 1 });
+  await expect(
+    page.getByRole("button", { name: "Play replay", exact: true }),
+  ).toBeInViewport({ ratio: 1 });
+  await expect(
+    page.getByRole("checkbox", { name: "Show tracking", exact: true }),
+  ).toBeInViewport({ ratio: 1 });
+  const strip = await page.locator(".round-library").boundingBox();
+  expect(strip!.height).toBeLessThan(90);
   await page.screenshot({
     path: test.info().outputPath("replay-stable-desktop.png"),
   });
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
   await page.screenshot({
     path: test.info().outputPath("replay-stable-mobile.png"),
   });
+  const beforeRemoval = await dbState(page);
+  const savedVideo = beforeRemoval.sessions.find((s) => s.id === "playable");
+  const savedReport = beforeRemoval.analyses.find(
+    (r) => r.sourceSessionId === "playable",
+  );
+  await page.locator(".session-card.is-selected .session-remove").click();
+  await expect(page.locator(".session-item")).toHaveCount(11);
+  await page.reload();
+  await page.getByRole("button", { name: /^Saved rounds/ }).click();
+  await page
+    .getByRole("button", { name: "Recently deleted (2)", exact: true })
+    .click();
+  await page
+    .locator(".trashed-round")
+    .first()
+    .getByRole("button", { name: "Restore", exact: true })
+    .click();
+  await expect(video).toHaveJSProperty("readyState", 4);
+  await page.getByRole("button", { name: "Play replay", exact: true }).click();
+  await expect(video).toHaveJSProperty("paused", false);
+  await page.getByRole("button", { name: "Pause replay", exact: true }).click();
+  const restored = await dbState(page);
+  expect(restored.sessions.find((s) => s.id === "playable")).toEqual(
+    savedVideo,
+  );
+  expect(
+    restored.analyses.find((r) => r.sourceSessionId === "playable"),
+  ).toEqual(savedReport);
+  expect(await page.evaluate(() => (window as any).__analysisJobs.length)).toBe(
+    0,
+  );
 });

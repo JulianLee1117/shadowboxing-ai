@@ -233,14 +233,28 @@ test.describe("actual local MediaPipe runtime", () => {
       true,
     );
 
+    const removedReplaySource = await replay.getAttribute("src");
+    await page.locator(".session-card.is-selected .session-remove").click();
+    await page.getByRole("button", { name: /^Recently deleted/ }).click();
     page.once("dialog", (dialog) => dialog.accept());
     await page
-      .getByRole("button", { name: "Delete this round", exact: true })
+      .getByRole("button", { name: "Delete permanently", exact: true })
       .click();
     await expect
       .poll(async () => (await savedSessionSummaries(page)).length)
       .toBe(1);
-    await expect(page.locator(".replay-stage video")).toHaveCount(0);
+    expect(
+      (await savedSessionSummaries(page)).map((session) => session.id),
+    ).toEqual([saved[1].id]);
+    // Removing the selected round opens the remaining round's original video.
+    await expect(replay).toBeVisible();
+    await expect(replay).toHaveAttribute("src", /^blob:/);
+    await expect(replay).not.toHaveAttribute("src", removedReplaySource!);
+    await expect
+      .poll(() =>
+        replay.evaluate((video: HTMLVideoElement) => video.readyState),
+      )
+      .toBeGreaterThanOrEqual(1);
     expect(externalRequests(requests)).toEqual([]);
   });
 });
@@ -390,7 +404,7 @@ async function savedSessionSummaries(page: Page) {
     // Read persisted browser evidence directly so this UI lifecycle test also
     // works against compiled production assets without a Vite source endpoint.
     const sessions = await new Promise<Session[]>((resolve, reject) => {
-      const open = indexedDB.open("corner-local-v1", 2);
+      const open = indexedDB.open("corner-local-v1");
       open.onerror = () =>
         reject(new Error("Could not read the session database."));
       open.onblocked = () =>

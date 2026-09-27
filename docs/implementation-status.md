@@ -16,6 +16,8 @@ Camera rounds record local video and poses without microphone access. Completion
 
 Review bounds its player to the viewport and keeps one accessible set of playback controls, including half-speed buttons, frame stepping and **Focus video**. The player header shows the detected total and selected result source. Selecting a punch or switching result views returns attention to the player. Video element and object URL remain stable across overlay and analysis-result toggles; only a changed source round/blob replaces the URL. Six count cards, the timeline and event list remain below. **Original results remain the default**; **Show video analysis** and **Show original** explicitly compare an optional second pass. **Recheck detections**, when offered, applies current rules to saved poses without rerunning pose inference or overwriting evidence.
 
+Saved rounds have direct remove controls beside their date, duration and original detection count. Removal moves a round to **Recently deleted** and offers **Undo**; **Restore** remains available after reloading. The video, annotations and cached analysis stay intact until an explicitly confirmed permanent deletion. Deleting the selected round selects another available round; deleting another round preserves the current replay. The library stays compact so the player remains the main review surface.
+
 ## Separate local video analysis
 
 **Re-run analysis** is a secondary, opt-in control for both new and older recordings. **Analyze recording** starts the job; an existing report offers **Analyze again** in the same panel. Finishing a round or loading a cached report does not start processing. Progress and **Cancel analysis** are visible while it runs, and replay remains available. Navigation invalidates pending callbacks and releases processing resources.
@@ -24,7 +26,7 @@ The decoder uses Mediabunny/WebCodecs to read native frames with decoded media t
 
 Analysis is bounded by **185 seconds**, **5,550 processed frames**, **250 MB**, **4K pixel count**, and **four minutes of processing** (**six minutes** for native RTM review). The first applicable cap governs; for example, a 60 fps clip can reach the frame cap before the duration cap. Unsupported decoding reports an error. Duration/frame/time truncation is labeled partial when frames are available; partial results do not replace original results by default.
 
-Reports are cached separately in IndexedDB and checked against video fingerprint, stance, timing and analysis version. Source video, poses, original detections and annotations are preserved. Reports export separately, and deleting a round also removes its derived report. Cache/save failures are surfaced. Browser/profile/origin changes can hide stored rounds, so export video and evidence JSON for a backup.
+Reports are cached separately in IndexedDB and checked against video fingerprint, stance, timing and analysis version. Source video, poses, original detections and annotations are preserved. Reports export separately. Moving a round to Recently deleted hides its report while preserving it for restoration; permanent deletion removes both. A late analysis write cannot restore a removed round. Cache/save failures are surfaced. Browser/profile/origin changes can hide stored rounds, so export video and evidence JSON for a backup.
 
 A fresh pass can produce different or worse results. The exact-decoding implementation is being compared against saved captures; no accuracy gain is claimed.
 
@@ -51,6 +53,10 @@ An optional [personal hybrid recognizer](personal-recognition.md) now runs in th
 The earlier [causal temporal training pipeline](temporal-training.md) trains and evaluates a small offline recognizer. Both the initial experiment and its fixed-protocol five-session follow-up produced too many false events to justify enabling the weights. It remains research code, not the app default or an independent generalization result. Private captures, provisional action labels, checkpoints and detailed metrics stay outside Git.
 
 Seven provisionally labeled recordings support regression testing and failure diagnosis. The recovery revision increased matched actions on both saved live poses and fresh video poses, with remaining false background gestures and shortened-boundary mismatches. A held extension can also be misread when the pose itself suggests an early return. Once a clip informs changes, it is development data. A later-day session evaluated against a frozen version is still needed; coach-reviewed technique labels are separate from action labels. No corrective guard, power or biomechanics advice is enabled.
+
+Two subsequent fresh rounds were labeled from video before their predictions were inspected, then evaluated against the unchanged personal bundle. They show uneven transfer: ordinary mixed actions can have the right family and hand but truncated event intervals, while a different movement/guard condition misses visible curved punches and misclassifies a repeated straight. Both captures continued processing at roughly 20 pose observations per second with no gaps over 150 ms. A full-frame pass reproduces the low-count failure. These are recognition and timing problems, not evidence that recognition stopped running. The original prospective results and failed-action diagnostics remain private; the two rounds have not been added to model training. See [next iteration decisions](iteration-plan.md).
+
+A fixed opposite-arm feature-dropout training trial used only the original seven recordings. It recovered some failed actions but regressed older mixed rounds, so its weights were not activated. The current local service retains its previous frozen recognizer.
 
 ## Verification and limits
 

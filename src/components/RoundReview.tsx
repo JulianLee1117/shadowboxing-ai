@@ -12,12 +12,12 @@ import {
   Download,
   Play,
   Pause,
-  Trash2,
   X,
   Maximize2,
   Minimize2,
 } from "lucide-react";
 import { PoseOverlay } from "./PoseOverlay";
+import { RoundLibrary } from "./RoundLibrary";
 import { ChoiceGroup, UtilityPanel } from "./ChoiceGroup";
 import { punchName, punchNotation } from "../lib/punches";
 import "./RoundReview.css";
@@ -27,21 +27,18 @@ import { useRoundAnalysis } from "../hooks/useRoundAnalysis";
 import { groupCombinations } from "../lib/combinations";
 import { summarizeTrackingTrust } from "../lib/trackingTrust";
 import { combinationLabel, DRILLS, type DrillId } from "../lib/drills";
-import {
-  deleteSession,
-  downloadBlob,
-  exportSession,
-  formatTime,
-} from "../lib/storage";
+import { downloadBlob, exportSession, formatTime } from "../lib/storage";
 import type { Session, SessionAnnotation } from "../lib/types";
 
 type Props = {
   sessions: Session[];
   selected: Session | null;
   saveState: "saving" | "saved" | "error";
+  unsavedIds: string[];
   onSelect: (session: Session) => void;
   onUpdate: (session: Session) => Promise<void>;
   onDeleted: (id: string) => void;
+  onRestored: (session: Session) => void;
   onNotice: (message: string) => void;
   onPractice: () => void;
 };
@@ -50,13 +47,16 @@ export function RoundReview({
   sessions,
   selected,
   saveState,
+  unsavedIds,
   onSelect,
   onUpdate,
   onDeleted,
+  onRestored,
   onNotice,
   onPractice,
 }: Props) {
   const [time, setTime] = useState(0);
+  const [trashCount, setTrashCount] = useState(0);
   const [focused, setFocused] = useState(false);
   const focusButtonRef = useRef<HTMLButtonElement>(null);
   const playerRef = useRef<HTMLDivElement>(null);
@@ -283,21 +283,6 @@ export function RoundReview({
   );
   const frame = nearest && Math.abs(nearest.t - time) <= 100 ? nearest : null;
   const tracking = frame ? assessArmTracking(frame) : null;
-  const remove = async () => {
-    if (
-      !selected ||
-      !window.confirm(
-        "Delete this round and its video from this browser? Export first if you want a copy.",
-      )
-    )
-      return;
-    try {
-      await deleteSession(selected.id);
-      onDeleted(selected.id);
-    } catch {
-      onNotice("Could not delete this round from local storage.");
-    }
-  };
 
   return (
     <section
@@ -324,45 +309,33 @@ export function RoundReview({
             New round
           </button>
         </div>
-        {sessions.length > 0 && (
-          <div className="round-library" aria-label="Saved rounds">
-            {sessions.map((session) => (
-              <button
-                className={`session-item ${session.id === sessionId ? "selected" : ""}`}
-                aria-pressed={session.id === sessionId}
-                key={session.id}
-                onClick={() => onSelect(session)}
-              >
-                <span>
-                  {new Date(session.createdAt).toLocaleString([], {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
-                <small>
-                  {formatTime(session.durationMs)} ·{" "}
-                  {session.source === "demo"
-                    ? "Demo"
-                    : session.video
-                      ? "Video"
-                      : "Motion only"}
-                </small>
-              </button>
-            ))}
-          </div>
-        )}
+        <RoundLibrary
+          sessions={sessions}
+          selectedId={sessionId}
+          unsavedIds={unsavedIds}
+          onSelect={onSelect}
+          onRemoved={onDeleted}
+          onRestored={onRestored}
+          onRemoving={(id) => {
+            if (id === sessionId) analysis.cancel();
+          }}
+          onTrashCount={setTrashCount}
+          onNotice={onNotice}
+        />
       </div>
       {!selected ? (
         <div className="review-empty">
           <h2>
             {sessions.length
               ? "Choose a round above."
-              : "Your first round starts here."}
+              : trashCount
+                ? "No saved rounds here."
+                : "Your first round starts here."}
           </h2>
           <p>
-            Record a short round, then compare your movement with its tracking.
+            {trashCount
+              ? "You can restore a round from Recently deleted above."
+              : "Record a short round, then compare your movement with its tracking."}
           </p>
           <button className="button primary" onClick={onPractice}>
             Go to practice
@@ -935,13 +908,6 @@ export function RoundReview({
                     Export video
                   </button>
                 )}
-                <button
-                  className="text-button delete"
-                  onClick={() => void remove()}
-                >
-                  <Trash2 size={15} />
-                  Delete this round
-                </button>
               </div>
               {analysis.report && (
                 <div className="analysis-details">

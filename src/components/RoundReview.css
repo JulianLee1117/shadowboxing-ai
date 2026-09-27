@@ -13,7 +13,17 @@
 
 .round-review .round-library {
   gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #a5b2a2 transparent;
   padding-bottom: 14px;
+}
+.library-scroll-hint {
+  margin: -4px 0 8px;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .round-review .session-item {
@@ -382,6 +392,11 @@
   aspect-ratio: auto;
   max-height: none;
 }
+@media (min-width: 701px) {
+  .round-review:has(.library-actions) .replay-stage {
+    height: clamp(220px, calc(100dvh - 440px), 560px);
+  }
+}
 .round-review .review-player.is-focused .replay-stage,
 .round-review .review-player:fullscreen .replay-stage {
   height: auto;
@@ -526,5 +541,120 @@
   }
   .review-player-result > span:first-child {
     display: none;
+  }
+}
+
+/* Removing a round is visible and reversible, separate from selecting it. */
+.round-review .session-card {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.round-review .session-card.is-selected {
+  background: #e9ede3;
+  border-color: #9bad8e;
+}
+.round-review .session-card .session-item {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-right: 8px;
+}
+.round-review .session-item small strong {
+  color: #465c4d;
+  font-weight: 600;
+}
+.round-review .session-remove {
+  width: 32px;
+  height: auto;
+  min-height: 44px;
+  color: #738075;
+  border-radius: 0;
+}
+.round-review .session-remove:hover {
+  color: #a34336;
+  background: #a3433610;
+}
+.library-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.round-undo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.round-undo .text-button {
+  color: #23553b;
+  font-weight: 650;
+}
+.library-actions .text-button {
+  min-height: 30px;
+}
+.trash-toggle {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.recently-deleted {
+  background: #eef1eb;
+  border-radius: 9px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  max-height: 270px;
+  overflow-y: auto;
+}
+.recently-deleted > p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.trashed-round {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-top: 1px solid #dbe1d6;
+  font-size: 12px;
+}
+.trashed-round > div {
+  display: grid;
+  gap: 4px;
+  margin-right: auto;
+}
+.trashed-round > div > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.trashed-round .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.trashed-round .permanent-delete {
+  color: #98574c;
+  font-size: 11px;
+}
+@media (max-width: 700px) {
+  .recently-deleted {
+    padding: 10px 12px;
+  }
+  .trashed-round {
+    gap: 8px 16px;
+    flex-wrap: wrap;
+  }
+  .trashed-round > div {
+    flex-basis: 100%;
+  }
+  .trashed-round .text-button {
+    min-height: 32px;
   }
 }

@@ -2,7 +2,7 @@
 
 The local pose service can run an explicitly enabled personal recognizer alongside RTMPose. It combines a fixed external family model with a small personal temporal model. It outputs physical hand, motion family, observed event times, and model support. The browser maps straight punches to jab/cross and curved punches to lead/rear roles using stance.
 
-This is experimental action recognition. It does not verify anatomical identity, classify good technique, measure impact, or establish that an observed punch was performed correctly. The current personal model has fitted development evidence only. Whole-recording leave-out experiments still fail on unfamiliar mixed-punch views, so a fresh recording remains necessary before making an independent accuracy claim.
+This is experimental action recognition. It does not verify anatomical identity, classify good technique, measure impact, or establish that an observed punch was performed correctly. The current personal model was fitted on seven development recordings. Two subsequent video-labeled rounds evaluated against that frozen model show uneven transfer: correct action identities can have truncated boundaries, and other visible curved actions remain missed. Whole-recording leave-out experiments also fail on unfamiliar mixed-punch views. These results do not establish reliable recognition across conditions or people.
 
 ## What runs
 
