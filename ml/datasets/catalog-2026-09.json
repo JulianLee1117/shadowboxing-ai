@@ -1,0 +1,443 @@
+{
+  "schemaVersion": "1.0",
+  "auditDate": "2026-09-26",
+  "scope": "Six-punch recognition, physical hand, continuous background and observable technique assessment",
+  "notice": "Research catalog, not a license grant. No external media imported and no access agreements accepted. Public code licenses do not establish data or third-party media rights.",
+  "datasets": [
+    {
+      "id": "boxingvi",
+      "name": "BoxingVI",
+      "priority": "first_external_rights_clearance",
+      "urls": {
+        "paper": "https://arxiv.org/abs/2511.16524",
+        "repository": "https://github.com/Bikudebug/BoxingVI",
+        "data": "https://drive.google.com/drive/folders/1Vyl8twJQ1qkqEPwhvfsrJsJ8nLQ92uoy"
+      },
+      "repositoryRevision": "638584676b85d870d6cc69c7b502efdaccf60679",
+      "modality": ["video_source_links", "estimated_2d_coco_pose"],
+      "classes": [
+        "jab",
+        "cross",
+        "lead_hook",
+        "rear_hook",
+        "lead_uppercut",
+        "rear_uppercut"
+      ],
+      "annotationKind": "event_interval",
+      "advertisedColumns": ["start_frame", "end_frame", "punch_class"],
+      "backgroundCompleteness": "unverified",
+      "qualityLabels": false,
+      "reportedCounts": {
+        "clips": 6915,
+        "athletes": 18,
+        "sourceVideos": 20
+      },
+      "access": {
+        "status": "author_download_link_present_package_unverified",
+        "mediaDownloaded": false
+      },
+      "licenseAudit": {
+        "data": "not_verified",
+        "code": "no_license_file_found",
+        "productTrainingCleared": false,
+        "redistributionCleared": false
+      },
+      "blockers": [
+        "Verify actual package and separate annotation/pose/media terms",
+        "Map true identities across source-video split",
+        "Resolve source-video availability and rights",
+        "Estimated skeletons are not pose ground truth"
+      ]
+    },
+    {
+      "id": "shadowpunch",
+      "name": "ShadowPunch: Fast Actions Spotting Benchmark",
+      "priority": "seek_release",
+      "urls": {
+        "paper": "https://openreview.net/pdf?id=Jq8HYNZG9s"
+      },
+      "modality": ["rgb_video", "annotated_2d_17_keypoint_pose"],
+      "classes": ["straight", "hook", "uppercut", "no_punch"],
+      "physicalHandLabels": ["left", "right"],
+      "annotationKind": "point_at_maximum_hand_extension",
+      "backgroundCompleteness": "no_punch_points_not_complete_intervals",
+      "qualityLabels": false,
+      "reportedCounts": {
+        "videos": 27,
+        "frames": 230502,
+        "fps": 60,
+        "eventAnnotations": 4840,
+        "poseFrames": 4761
+      },
+      "access": {
+        "status": "paper_indexed_release_not_verified",
+        "primaryDocumentVersion": "Anonymous ICLR2025 submission",
+        "directPdf": "browser_verification_required",
+        "mediaDownloaded": false
+      },
+      "licenseAudit": {
+        "data": "not_verified",
+        "productTrainingCleared": false,
+        "redistributionCleared": false
+      },
+      "blockers": [
+        "Locate author release and applicable license",
+        "Verify stance to derive lead/rear",
+        "Do not fabricate onset/end intervals from peak points",
+        "Audit subject-separated splits"
+      ]
+    },
+    {
+      "id": "fightflow",
+      "name": "FightFlow",
+      "priority": "methodology_reference_only",
+      "urls": {
+        "repository": "https://github.com/krishmula/fightflow",
+        "metadata": "https://api.github.com/repos/krishmula/fightflow",
+        "annotations": "https://github.com/krishmula/fightflow/blob/main/data/annotations.csv",
+        "manifest": "https://github.com/krishmula/fightflow/blob/main/data/processed/dataset_manifest.csv"
+      },
+      "repositoryRevision": "4b9c073c436c543e49c4801713a014e6c4a92961",
+      "modality": ["video_source_links", "pose_extraction_pipeline"],
+      "classes": ["straight", "hook", "uppercut", "none"],
+      "physicalHandLabels": [],
+      "annotationKind": "frame_point",
+      "columns": [
+        "video_id",
+        "frame_index",
+        "punch_type",
+        "occluded",
+        "notes",
+        "timestamp"
+      ],
+      "backgroundCompleteness": "sampled_none_points",
+      "qualityLabels": false,
+      "observedMetadata": {
+        "rawRows": 7980,
+        "selectedClips": 3320,
+        "videoIds": 20,
+        "trainRows": 2625,
+        "valRows": 695,
+        "sameFrameConflictingFamilyKeys": 5,
+        "videoIdsOverlapBetweenSplits": false,
+        "annotationsSha256": "cea56b4e9db638a280fa02809bd9f7247ef59bb9d7eb64cd857fe8d3e36179f3",
+        "datasetManifestSha256": "977b066dbdcc90c181e6647aa922ab7e22e1dd5a28d52370bad0cc5a9cf6599a",
+        "trainVideoIds": 18,
+        "valVideoIds": 2
+      },
+      "access": {
+        "status": "csv_and_manifests_inspected_no_media_imported",
+        "mediaDownloaded": false
+      },
+      "licenseAudit": {
+        "data": "not_verified",
+        "code": "no_license_file_GitHub_API_null",
+        "productTrainingCleared": false,
+        "redistributionCleared": false
+      },
+      "blockers": [
+        "Source videos include YouTube without verified reuse rights",
+        "No physical hand or lead/rear labels",
+        "README selects window length using test F1; manifests call split val",
+        "Centered windows and bidirectional LSTM are noncausal",
+        "Five conflicting frame keys require adjudication; person identity split unverified"
+      ]
+    },
+    {
+      "id": "duobox",
+      "name": "DuoBox / Ready-to-React",
+      "priority": "optional_noncommercial_mocap_research",
+      "urls": {
+        "paper": "https://arxiv.org/abs/2502.20370",
+        "repository": "https://github.com/zju3dv/ready_to_react",
+        "agreement": "https://docs.google.com/forms/d/e/1FAIpQLSe8-G1PxykPoCR0wjH4HZKXkWz3_5UTa9x1if3L7bGPUXhmNA/viewform",
+        "codeLicense": "https://github.com/zju3dv/ready_to_react/blob/main/LICENSE"
+      },
+      "repositoryRevision": "2dea0c94503af0888a3e0ca4aa48cee31702180b",
+      "modality": ["optitrack_3d_skeleton", "smplx_fit"],
+      "advertisedMovementInventory": [
+        "jab",
+        "cross",
+        "lead_hook",
+        "rear_hook",
+        "lead_uppercut",
+        "rear_uppercut",
+        "defense",
+        "dodge",
+        "evade",
+        "counter",
+        "counterattack",
+        "parry",
+        "combinations",
+        "sparring"
+      ],
+      "annotationKind": "motion_sequences_event_labels_not_verified",
+      "qualityLabels": false,
+      "advertisedSchema": {
+        "position": "T,J,3 global joints",
+        "rotation": "T,J,3,3 root global / other joints local",
+        "smplx": ["transl", "global_orient", "body_pose", "betas"]
+      },
+      "reportedCounts": {
+        "participants": 3,
+        "minutes": 63.4,
+        "fps": 120,
+        "sequences": 116
+      },
+      "access": {
+        "status": "request_form_and_agreement",
+        "agreementAccepted": false,
+        "mediaDownloaded": false
+      },
+      "licenseAudit": {
+        "data": "noncommercial_research_only_no_further_copy_publish_distribute_access_revocable",
+        "code": "PRL-1.0 separate project registration terms",
+        "productTrainingCleared": false,
+        "redistributionCleared": false
+      },
+      "blockers": [
+        "Agreement restricts use and distribution",
+        "No verified RGB or event boundaries",
+        "Motion inventory is not per-event supervision",
+        "SMPL-X terms require separate review"
+      ]
+    },
+    {
+      "id": "cmu-mocap-boxing",
+      "name": "CMU Graphics Lab Motion Capture Database \u2014 selected boxing and gestures",
+      "priority": "usable_auxiliary",
+      "urls": {
+        "home": "https://mocap.cs.cmu.edu/",
+        "terms": "https://mocap.cs.cmu.edu/faqs.php",
+        "subject13": "https://mocap.cs.cmu.edu/search.php?subjectnumber=13",
+        "subject14": "https://mocap.cs.cmu.edu/search.php?subjectnumber=14",
+        "subject17": "https://mocap.cs.cmu.edu/search.php?subjectnumber=17"
+      },
+      "modality": ["asf_amc", "c3d"],
+      "annotationKind": "sequence_description",
+      "classes": ["boxing", "other_sequence_descriptions"],
+      "verifiedBoxingTrials": [
+        "13_17",
+        "13_18",
+        "14_01",
+        "14_02",
+        "14_03",
+        "17_10"
+      ],
+      "fps": 120,
+      "negativeCandidates": [
+        "reaching",
+        "waving",
+        "drinking",
+        "household_gestures"
+      ],
+      "qualityLabels": false,
+      "access": {
+        "status": "targeted_original_file_links_available",
+        "mediaDownloaded": false,
+        "bulkCrawling": "site_requests_no_crawling"
+      },
+      "licenseAudit": {
+        "data": "custom_permissive_terms",
+        "productTrainingCleared": true,
+        "redistributionCleared": true,
+        "conditions": [
+          "May include in commercially sold products",
+          "Do not resell raw or converted data directly",
+          "Preserve source and requested acknowledgement"
+        ]
+      },
+      "blockers": [
+        "No six-punch event labels",
+        "One person may have multiple subject IDs",
+        "Hands/toes may be noisy; finger/thumb channels not captured",
+        "Synthetic projection cannot validate camera tracking accuracy"
+      ]
+    },
+    {
+      "id": "zenodo-boxing-imu",
+      "name": "Boxing punch data",
+      "priority": "sensor_branch_only",
+      "urls": {
+        "record": "https://zenodo.org/records/14965635",
+        "metadata": "https://zenodo.org/api/records/14965635",
+        "paper": "https://doi.org/10.1371/journal.pone.0322490"
+      },
+      "modality": ["bilateral_wrist_imu"],
+      "annotationKind": "csv_sensor_samples_by_punch_file",
+      "classes": [
+        "lead_jab",
+        "lead_hook",
+        "lead_uppercut",
+        "rear_jab",
+        "rear_hook",
+        "rear_uppercut"
+      ],
+      "sampleRateHz": 200,
+      "qualityLabels": false,
+      "access": {
+        "status": "open_csv_downloads",
+        "approxBytes": 11400000,
+        "mediaDownloaded": false
+      },
+      "licenseAudit": {
+        "data": "CC-BY-4.0",
+        "metadataAccessRight": "open",
+        "productTrainingCleared": true,
+        "redistributionCleared": true,
+        "conditions": ["Attribution and license notice; indicate changes"]
+      },
+      "blockers": [
+        "No video or pose files listed",
+        "Cannot convert wrist IMU into webcam joint positions without additional calibrated motion information",
+        "Verify no-punch/time labeling inside CSV before temporal use"
+      ]
+    },
+    {
+      "id": "combat-sports-images",
+      "name": "Combat Sports Dataset",
+      "priority": "low",
+      "urls": {
+        "record": "https://zenodo.org/records/15349809",
+        "metadata": "https://zenodo.org/api/records/15349809",
+        "original": "https://universe.roboflow.com/combatsports/combatsports-merge-attempt/dataset/2"
+      },
+      "modality": ["images", "yolov5_boxes"],
+      "annotationKind": "image_object_boxes",
+      "classes": [
+        "boxing-bag",
+        "cross",
+        "high-guard",
+        "hook",
+        "kick",
+        "low-guard",
+        "person"
+      ],
+      "qualityLabels": false,
+      "reportedCounts": {
+        "images": 7757
+      },
+      "access": {
+        "status": "public_zip_listed",
+        "approxBytes": 391000000,
+        "mediaDownloaded": false
+      },
+      "licenseAudit": {
+        "metadata": "CC-BY-4.0",
+        "description": "Public Domain",
+        "data": "conflicting_declarations",
+        "productTrainingCleared": false,
+        "redistributionCleared": false
+      },
+      "blockers": [
+        "Resolve conflicting license declarations and original image rights",
+        "No temporal or anatomical-hand labels",
+        "Missing uppercuts and six-punch ontology",
+        "Augmented variants require source-grouped split"
+      ]
+    },
+    {
+      "id": "olympic-boxing-static",
+      "name": "Olympic Boxing Punch Classification Video Dataset",
+      "priority": "exclude_product_training_without_new_rights",
+      "urls": {
+        "record": "https://www.kaggle.com/datasets/piotrstefaskiue/olympic-boxing-punch-classification-video-dataset",
+        "metadata": "https://www.kaggle.com/api/v1/datasets/view/piotrstefaskiue/olympic-boxing-punch-classification-video-dataset",
+        "paper": "https://doi.org/10.3390/e26080617"
+      },
+      "modality": ["rgb_match_video", "frame_punch_coordinates"],
+      "annotationKind": "per_frame_hand_target_effect",
+      "labelAxes": {
+        "physicalHand": ["left", "right"],
+        "outcome": ["head_hit", "body_hit", "blocked", "missed"]
+      },
+      "qualityLabels": false,
+      "access": {
+        "status": "public_research_release",
+        "approxBytes": 3339592607,
+        "mediaDownloaded": false
+      },
+      "licenseAudit": {
+        "data": "noncommercial_academic_teaching_research_and_nonprofit_research_only",
+        "productTrainingCleared": false,
+        "redistributionCleared": false
+      },
+      "blockers": [
+        "Narrow allowed-use terms",
+        "No straight/hook/uppercut labels",
+        "Two-person match footage unlike solo webcam"
+      ]
+    },
+    {
+      "id": "boxmac",
+      "name": "BoxMAC",
+      "priority": "release_unverified",
+      "urls": {
+        "paper": "https://arxiv.org/abs/2412.18204"
+      },
+      "modality": ["match_video"],
+      "classes": [
+        "jab",
+        "cross",
+        "lead_hook",
+        "rear_hook",
+        "lead_uppercut",
+        "rear_uppercut",
+        "stance",
+        "slip",
+        "block",
+        "guard",
+        "duck",
+        "clinching",
+        "no_action"
+      ],
+      "annotationKind": "multilabel_frame_and_clip",
+      "qualityLabels": false,
+      "access": {
+        "status": "working_official_download_not_verified",
+        "mediaDownloaded": false
+      },
+      "licenseAudit": {
+        "data": "not_verified",
+        "productTrainingCleared": false,
+        "redistributionCleared": false
+      },
+      "blockers": [
+        "No verified release or dataset terms",
+        "Frame labels can combine two people",
+        "No technical fault labels"
+      ]
+    },
+    {
+      "id": "boxmind",
+      "name": "BoxMind BoxingWeb / BoxingStudio",
+      "priority": "release_unverified",
+      "urls": {
+        "paper": "https://arxiv.org/abs/2601.11492"
+      },
+      "modality": ["match_video"],
+      "annotationKind": "atomic_event_interval_attributes",
+      "labelAxes": {
+        "family": ["straight", "hook", "uppercut"],
+        "role": ["lead", "rear"],
+        "target": ["head", "torso"],
+        "range": ["long", "mid", "close"],
+        "effect": ["effective", "ineffective"]
+      },
+      "qualityLabels": false,
+      "access": {
+        "status": "working_official_download_not_verified",
+        "mediaDownloaded": false
+      },
+      "licenseAudit": {
+        "data": "not_verified_article_CC_BY_is_not_corpus_license",
+        "productTrainingCleared": false,
+        "redistributionCleared": false
+      },
+      "blockers": [
+        "No verified release or dataset terms",
+        "Match effectiveness labels are not solo technique correctness"
+      ]
+    }
+  ]
+}

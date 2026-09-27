@@ -42,6 +42,8 @@ Straight-punch detection uses projected motion and observed recovery. Independen
 
 Local RTM pose challengers place some visibly misplaced right-wrist/elbow estimates more accurately, but have not established a live replacement for Full. A runnable [temporal training experiment](docs/temporal-training.md) produces excessive false events on the small development corpus; its weights are **not enabled in the app**. No model comparison, training experiment or second video pass is claimed as validated accuracy, generalization, or coaching benefit. Private footage and numeric experiment reports stay out of Git. See [implementation status](docs/implementation-status.md) and [next decisions](docs/iteration-plan.md).
 
+The [six-punch dataset tools](docs/action-dataset.md) now prepare physical-hand/stance labels, preserve unknown targets and check split leakage. A separate [coaching-review workflow](docs/coaching-review.md) collects independent human criterion labels and agreement without model predictions or automatic grades. These are research tools; they do not enable new punch types or technique advice in the app. The [current external-data audit](docs/research/boxing-datasets-2026-09.md) records verified access and reuse gaps. The next collection is [two short hook/uppercut rounds](docs/six-punch-capture.md).
+
 ## Verify and evaluate
 
 ```sh

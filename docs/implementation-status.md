@@ -46,6 +46,8 @@ Five provisionally labeled recordings support regression testing and failure dia
 
 ## Verification and limits
 
+Two standard-library research CLIs extend the data workflow. `ml.action_dataset` audits source/participant/day splits, fingerprints evidence, preserves physical hand and stance-dependent six-punch identity, and prepares per-arm family targets with explicit unknown masks. Incomplete jab/cross annotation cannot establish multiclass background. No multiclass weights are trained or enabled. `ml.coaching` prepares prediction-blind local human-review packets for two draft guard criteria, validates eligibility/evidence, and compares independent reviews with abstention coverage. It never prefills form judgments or issues corrections. See [dataset preparation](action-dataset.md), [coaching review](coaching-review.md), and the [external-source catalog](research/boxing-datasets-2026-09.md).
+
 Tests cover detector resets/peak/repeat behavior, combinations, tracking intervals, immutable reports, native-frame decoding, analysis cancellation/cache lifecycle, recording/review, and evaluation/training software. Browser tests use generated video and stub physical camera requests. They establish integration behavior, not boxing accuracy; consult current test output for exact results.
 
 Live capture allows one inference request in flight and reports skipped frames. `frameAgeMs` begins at the browser's observed frame callback and excludes sensor exposure; model-call time is separate. Punch events retain causal finalization timestamps. Saved-video cadence is source cadence, not processing throughput.

@@ -12,14 +12,16 @@ The [temporal training pipeline](temporal-training.md) is runnable, but both its
 
 ## Decisions before another model change
 
+The [six-punch data preparer](action-dataset.md) and [independent coaching review](coaching-review.md) now make the next evidence collection runnable. Add the missing lead/rear hooks and uppercuts plus explicitly reviewed background before extending the causal model to per-arm families and event boundaries. Use [two short capture rounds](six-punch-capture.md) to start; current live recognition remains jab/cross only. The [external-source audit](research/boxing-datasets-2026-09.md) identifies BoxingVI and ShadowPunch as access/rights leads, not imported training data. Correctness of technique requires separate coach judgments.
+
 | Remaining problem                                   | Evidence to collect                                                                   | Next experiment                                                                           |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | A confident wrist is in the wrong place             | Original frames with manually marked wrists/elbows and visible/ambiguous states       | Extend the promising RTM joint comparisons to a fixed full-clip and runtime evaluation    |
 | False extra person boxes prevent analysis           | Verified target-person regions and background examples                                | Validate explicit person selection/tracking before judging another pose model             |
-| RTM native scores fail MediaPipe-oriented gates     | Manually checked joint locations and visibility across native score ranges             | Freeze and validate a model-specific observation policy before comparing recognition     |
-| Faster native inference needs a live path           | Full-clip profiles, coordinate differences, warm-up and sustained frame delivery        | Test a local Core ML capture loop before adding a browser/native bridge                   |
+| RTM native scores fail MediaPipe-oriented gates     | Manually checked joint locations and visibility across native score ranges            | Freeze and validate a model-specific observation policy before comparing recognition      |
+| Faster native inference needs a live path           | Full-clip profiles, coordinate differences, warm-up and sustained frame delivery      | Test a local Core ML capture loop before adding a browser/native bridge                   |
 | Natural motion defeats fixed rules                  | Continuous action/background labels, including imperfect returns and fast repetitions | Retrain the temporal baseline after adding independent sessions and negatives             |
-| Relaxed arm lowering looks like a straight          | Non-punch gestures plus real body-level straights in several views                    | Test direction and torso-relative features without assuming every low fist is invalid    |
+| Relaxed arm lowering looks like a straight          | Non-punch gestures plus real body-level straights in several views                    | Test direction and torso-relative features without assuming every low fist is invalid     |
 | A new video pass changes counts                     | Identical source timestamps, model/runtime provenance and frozen action labels        | Compare recovered, lost and false events; do not choose a default from total counts alone |
 | Recognition is adequate but correction is requested | Coach-labeled criteria, counterexamples and view limitations                          | Validate one observable cue before enabling technique feedback                            |
 
