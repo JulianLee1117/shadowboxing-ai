@@ -1187,7 +1187,7 @@ test("a late in-flight camera frame stays inside the frozen media duration", asy
     page.getByRole("button", { name: "Stop & save", exact: true }),
   ).toBeVisible();
   await page.clock.fastForward(29_850);
-  const callbackTimes = [
+  const callbackBounds = [
     await page.evaluate(() => {
       const state = window as unknown as {
         mediaMs: number;
@@ -1198,7 +1198,7 @@ test("a late in-flight camera frame stays inside the frozen media duration", asy
       state.callback(now, {
         mediaTime: 40.015,
       } as VideoFrameCallbackMetadata);
-      return now;
+      return { before: now, after: performance.now() };
     }),
   ];
   await expect
@@ -1213,7 +1213,7 @@ test("a late in-flight camera frame stays inside the frozen media duration", asy
   // separately from the one result that survives the closing boundary.
   for (const mediaTime of [40.048, 40.081]) {
     await page.clock.runFor(30);
-    callbackTimes.push(
+    callbackBounds.push(
       await page.evaluate((mediaTime) => {
         const state = window as unknown as {
           mediaMs: number;
@@ -1224,7 +1224,7 @@ test("a late in-flight camera frame stays inside the frozen media duration", asy
         state.callback(now, {
           mediaTime,
         } as VideoFrameCallbackMetadata);
-        return now;
+        return { before: now, after: performance.now() };
       }, mediaTime),
     );
   }
@@ -1252,13 +1252,25 @@ test("a late in-flight camera frame stays inside the frozen media duration", asy
     gapMs: { samples: 2, complete: true },
   });
   expect(saved.capture?.sourceCadence?.mediaSpanMs).toBeCloseTo(66);
-  const callbackSpanMs = callbackTimes.at(-1)! - callbackTimes[0];
-  expect(callbackSpanMs).toBeGreaterThanOrEqual(60);
-  expect(saved.capture?.sourceCadence?.callbackSpanMs).toBeCloseTo(
-    callbackSpanMs,
+  // The hook reads its own clock synchronously inside each callback. Real time
+  // can advance between that read and the fixture's reads, even with Clock
+  // installed. Bound the actual observation rather than assume identical reads.
+  const firstCallback = callbackBounds[0];
+  const lastCallback = callbackBounds.at(-1)!;
+  const minimumCallbackSpanMs = lastCallback.before - firstCallback.after;
+  const maximumCallbackSpanMs = lastCallback.after - firstCallback.before;
+  expect(minimumCallbackSpanMs).toBeGreaterThanOrEqual(60);
+  expect(saved.capture?.sourceCadence?.callbackSpanMs).toBeGreaterThanOrEqual(
+    minimumCallbackSpanMs,
   );
-  expect(saved.capture?.sourceCadence?.callbackFps).toBeCloseTo(
-    2000 / callbackSpanMs,
+  expect(saved.capture?.sourceCadence?.callbackSpanMs).toBeLessThanOrEqual(
+    maximumCallbackSpanMs,
+  );
+  expect(saved.capture?.sourceCadence?.callbackFps).toBeGreaterThanOrEqual(
+    2000 / maximumCallbackSpanMs,
+  );
+  expect(saved.capture?.sourceCadence?.callbackFps).toBeLessThanOrEqual(
+    2000 / minimumCallbackSpanMs,
   );
   expect(saved.capture?.trackSettingsFps).toBeGreaterThan(0);
   expect(saved.capture?.deliveredFps).toBeUndefined();
