@@ -19,8 +19,8 @@ RECOGNIZER_ID = "personal-hybrid-v1"
 FEATURE_VERSION = "arm-offsets-native-v3"
 MAXIMUM_GAP_MS = 150
 HISTORY_MS = 4200
-LOOKAHEAD_MS = 300
-DECODER_VERSION = "observed-personal-cycles-v4"
+LOOKAHEAD_MS = 150
+DECODER_VERSION = "observed-personal-cycles-v5"
 
 
 def _digest(path):

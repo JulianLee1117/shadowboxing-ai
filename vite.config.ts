@@ -17,6 +17,11 @@ const localPoseProxy = {
 };
 
 export default defineConfig({
+  // Unit tests and the running studio must not rewrite each other's optimized
+  // dependency metadata; doing so leaves open tabs with stale module URLs.
+  cacheDir: process.env.VITEST
+    ? "node_modules/.vite-vitest"
+    : "node_modules/.vite",
   plugins: [react()],
   server: {
     host: "127.0.0.1",

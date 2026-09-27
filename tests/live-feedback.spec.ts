@@ -24,7 +24,9 @@ test("large live feedback and focus controls work without opening a camera", asy
   await page.getByRole("button", { name: "Try demo", exact: true }).click();
   await page.getByRole("button", { name: "Start demo", exact: true }).click();
   await expect(page.getByTestId("live-punch-count")).toHaveText("0");
-  await expect(page.locator(".live-punch-name")).toHaveText("Find your rhythm");
+  await expect(page.locator(".live-history-empty strong")).toHaveText(
+    "Ready when you are",
+  );
   await expect(
     page.getByRole("button", { name: "Stop & save", exact: true }),
   ).toBeInViewport({ ratio: 1 });
@@ -38,19 +40,29 @@ test("large live feedback and focus controls work without opening a camera", asy
       Number(await page.getByTestId("live-punch-count").textContent()),
     )
     .toBeGreaterThan(0);
-  await expect(page.locator(".live-punch-name.detected")).toBeVisible();
+  await expect(page.locator(".punch-history-item.latest")).toBeVisible();
   await expect(page.locator(".detection-tick")).toHaveText("+1");
   await expect(page.locator(".live-feedback")).toHaveClass(/hand-(left|right)/);
   await expect(page.locator(".camera-stage .pose-overlay")).toBeVisible();
   await expect(page.locator("select, details")).toHaveCount(0);
-  await expect(page.locator(".live-punch-identity")).toHaveText(
-    /^(Left|Right) hand · (Lead|Rear)$/,
-  );
+  await expect(
+    page.locator(".punch-history-item.latest .punch-history-identity > span"),
+  ).toHaveText(/^(Left|Right) hand$/);
   expect(
     await page
-      .locator(".live-punch-name")
+      .locator(".punch-history-item.latest strong")
       .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
-  ).toBeGreaterThanOrEqual(60);
+  ).toBeGreaterThanOrEqual(30);
+  await expect
+    .poll(async () =>
+      Number(await page.getByTestId("live-punch-count").textContent()),
+    )
+    .toBeGreaterThanOrEqual(4);
+  await expect(page.locator(".punch-history-item")).toHaveCount(4);
+  await expect(page.locator(".punch-history-item.latest")).toHaveAttribute(
+    "data-sequence",
+    await page.getByTestId("live-punch-count").innerText(),
+  );
   await page.screenshot({
     path: test.info().outputPath("practice-focused-desktop.png"),
   });
@@ -74,8 +86,10 @@ test("large live feedback and focus controls work without opening a camera", asy
   await page.getByRole("button", { name: "Try demo", exact: true }).click();
   await page.getByRole("button", { name: "Start demo", exact: true }).click();
   await expect(page.getByTestId("live-punch-count")).toHaveText("0");
-  await expect(page.locator(".live-punch-name")).toHaveText("Find your rhythm");
-  await expect(page.locator(".live-punch-name.detected")).toHaveCount(0);
+  await expect(page.locator(".live-history-empty strong")).toHaveText(
+    "Ready when you are",
+  );
+  await expect(page.locator(".punch-history-item.latest")).toHaveCount(0);
   await page.getByRole("button", { name: "Stop & save", exact: true }).click();
 });
 
@@ -122,6 +136,30 @@ test("mobile practice and focus view stay within the viewport", async ({
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
+  await page.getByText("More options", { exact: true }).click();
+  await page.getByRole("button", { name: "Try demo", exact: true }).click();
+  await page.getByRole("button", { name: "Start demo", exact: true }).click();
+  await page.getByRole("button", { name: "Focus view", exact: true }).click();
+  await expect
+    .poll(async () =>
+      Number(await page.getByTestId("live-punch-count").textContent()),
+    )
+    .toBeGreaterThanOrEqual(4);
+  await expect(page.locator(".punch-history-item:visible")).toHaveCount(3);
+  const history = await page.locator(".live-history").boundingBox();
+  const total = await page.locator(".live-total").boundingBox();
+  const timer = await page
+    .getByRole("timer", { name: "Round time remaining" })
+    .boundingBox();
+  expect(history!.x + history!.width).toBeLessThanOrEqual(total!.x);
+  expect(history!.y).toBeGreaterThan(timer!.y + timer!.height);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await page.screenshot({
+    path: test.info().outputPath("punch-history-mobile.png"),
+  });
+  await page.getByRole("button", { name: "Stop & save", exact: true }).click();
 });
 
 test("an untracked round explains missing detections while keeping recording controls visible", async ({
@@ -142,10 +180,10 @@ test("an untracked round explains missing detections while keeping recording con
   await page.getByRole("button", { name: "Start demo", exact: true }).click();
   await expect(page.getByLabel("Arm tracking")).toContainText("L · uncertain");
   await expect(page.getByLabel("Arm tracking")).toContainText("R · uncertain");
-  await expect(page.locator(".live-punch-name")).toHaveText("Tracking unclear");
-  await expect(page.locator(".live-punch-identity")).toHaveText(
-    "Keep your arms and torso in view",
+  await expect(page.locator(".live-tracking-note")).toHaveText(
+    "Tracking unclear · keep your arms in view",
   );
+  await expect(page.locator(".punch-history-item")).toHaveCount(0);
   await expect(
     page.getByRole("timer", { name: "Round time remaining" }),
   ).toBeVisible();

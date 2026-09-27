@@ -7,6 +7,13 @@
   min-width: 0;
 }
 
+.round-review .review-heading-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .round-review .page-heading {
   margin-bottom: 16px;
 }
@@ -481,6 +488,13 @@
 .review-shell main {
   padding-top: 18px;
 }
+.round-review .review-heading-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .round-review .page-heading {
   margin-bottom: 10px;
 }

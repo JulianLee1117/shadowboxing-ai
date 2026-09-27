@@ -1,14 +1,25 @@
 # Next iteration decisions
 
-Reviewed September 26, 2026. The immediate priority is consistent recognition on a new round. The wider product goals remain in [the project plan](project-plan.md).
+Reviewed September 27, 2026. The immediate priority is consistent recognition on a new round. The wider product goals remain in [the project plan](project-plan.md).
 
 ## Current product loop
 
-Choose a lead hand and duration, enable the camera, then start the countdown and step back. The skeleton, punch name and running count provide live feedback. Finishing opens the original video and live results immediately. A full video pass is optional; it is useful for diagnosis, not a required step or a promise of better recognition.
+Choose a lead hand and duration, enable the camera, then start the countdown and step back. The skeleton, persistent punch history and running count provide live feedback. Finishing opens the original video and live results immediately. A full video pass is optional; it is useful for diagnosis, not a required step or a promise of better recognition.
 
 The optional native RTMPose service and personal causal recognizer are running locally. They recognize all six stance-dependent punch identities. The current model uses seven development recordings; fitted results do not establish transfer. MediaPipe remains available as the default for installations without local weights. [Implementation status](implementation-status.md) describes the shipped paths and limits.
 
-## What the new rounds test
+## Current next gate
+
+The latest round exposes two distinct problems: patchy right elbow/wrist observations on most rear hooks, and missed short/fast jabs even when those joints are tracked. The persistent log and 150 ms arbitration hold improve feedback delivery; they do not fix those recognition errors. [The latency audit](research/detection-latency-2026-09.md) retains the failed exact-parity gate and reviewed boundary tradeoff.
+
+1. On existing development footage, mark visible wrist/elbow pixels and physical hand for curved-action and guard windows. Compare one fixed observation challenger (pose or short RGB-plus-pose), measuring localization, false guard counts and whole-event outcomes together.
+2. Separately diagnose causal phase/cycle behavior for fully tracked short and repeated straights. Freeze a protocol before fitting; do not change pose gates to mask classifier errors.
+3. Use **Coach review** for the user's explicit action and guard judgments. Start with 10–15 isolated high-guard straight examples; mixed-combination windows may be not applicable. Add missed moments and ordinary non-punch movement. These selected windows do not certify complete annotation or exact action bounds.
+4. Keep an untouched later-day round for the next frozen candidate. Report occurrence, interval coverage, false counts, observed pose cadence and actual delay separately. Evaluate one coaching cue only after its visible hand/head evidence and context rubric are reliable.
+
+The first labels are supervised review material, not reinforcement learning and not an immediate model update. [The form roadmap](research/form-coaching-roadmap-2026-09.md) explains why genuine pose throughput, clear source pixels and guarded abstention matter more than a nominal 30 fps label.
+
+## What the earlier rounds tested
 
 Two fresh rounds were recorded after the previous bundle was frozen. Preserve their original video, per-frame native decisions and model fingerprint before any re-analysis. Label recognizable actions from video before consulting predictions, including imperfect punches, ordinary transitions and uncertain intervals.
 

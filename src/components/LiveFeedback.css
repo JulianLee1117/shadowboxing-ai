@@ -1,182 +1,285 @@
 .live-feedback {
   position: absolute;
-  inset: auto 0 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 12px 32px;
-  padding: 40px 36px 24px;
-  color: #f7faef;
-  background: linear-gradient(transparent, #08100d70 48%, #08100da8);
-  text-shadow: 0 2px 8px #0009;
+  inset: auto 26px 22px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  color: #f4f7ef;
   pointer-events: none;
 }
-.live-punch {
+.live-feedback .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.live-history {
+  width: clamp(290px, 30vw, 420px);
+  padding: 14px;
+  border: 1px solid #eaf6e321;
+  border-radius: 14px;
+  background: #101c18e8;
+  box-shadow: 0 4px 24px #0002;
+}
+.live-history-heading {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  gap: 10px;
+  padding: 0 2px 10px;
+  color: #e5ecdf;
+  font-size: 12px;
+  font-weight: 600;
+}
+.live-history-order {
+  margin-left: auto;
+  color: #aab8af;
+  font-size: 11px;
+  font-weight: 400;
+}
+.detection-tick {
+  min-width: 25px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: #0e2019;
+  background: #deefce;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  /* Mounted with each new receipt ID, even if its source timestamp is old.
+     This changes visibility only: it never queues or delays the action text. */
+  visibility: hidden;
+  animation: detection-receipt 900ms step-end;
+}
+.live-feedback.hand-left .detection-tick {
+  background: var(--hand-left);
+}
+.live-feedback.hand-right .detection-tick {
+  background: var(--hand-right);
+}
+.punch-history {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.punch-history-item {
+  --punch-color: var(--hand-left);
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--punch-color);
+  border-radius: 3px 7px 7px 3px;
+  background: #ffffff05;
+  animation: detection-arrives 160ms ease-out;
+}
+.punch-history-item.hand-right {
+  --punch-color: var(--hand-right);
+}
+.punch-history-item.latest {
+  background: #ffffff0d;
+}
+.punch-history-number {
+  display: grid;
+  place-items: center;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--punch-color) 45%, transparent);
+  border-radius: 7px;
+  color: var(--punch-color);
+  font-size: 22px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.punch-history-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.punch-history-identity strong {
+  color: #dbe4db;
+  font-size: clamp(20px, 1.8vw, 26px);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+.latest .punch-history-identity strong {
+  color: var(--punch-color);
+  font-size: clamp(25px, 2.5vw, 36px);
+  font-weight: 600;
+}
+.punch-history-identity > span {
+  color: #b7c4bb;
+  font-size: 11px;
+}
+.punch-history-time {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  color: #b5c2b9;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.punch-history-time > span {
+  color: #dde6dd;
+}
+.live-history-empty {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  min-width: 0;
+  padding: 12px 4px 18px;
 }
-.live-eyebrow {
+.live-history-empty strong {
+  font-size: clamp(25px, 2.5vw, 36px);
+  font-weight: 450;
+  letter-spacing: -0.025em;
+}
+.live-history-empty > span {
+  color: #b7c4bb;
+  font-size: 13px;
+}
+.live-tracking-note {
+  min-height: 12px;
+  padding: 12px 2px 0;
+  color: #b7c4bb;
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 2px;
-  color: #c3cdbc;
+  line-height: 1.35;
 }
-.live-punch-name {
-  font-size: clamp(36px, 5.8vw, 88px);
-  font-weight: 650;
-  letter-spacing: -0.055em;
-  line-height: 1.02;
-  overflow-wrap: anywhere;
+.live-tracking-note.needs-framing {
+  color: #f5c894;
 }
-.live-punch-name.detected {
-  color: #d9f6ad;
-  animation: detection-arrives 180ms ease-out;
-}
-.live-punch-name.waiting {
-  font-size: clamp(28px, 3.8vw, 58px);
-  font-weight: 450;
-}
-.live-punch-name.needs-framing {
-  color: #f1c28d;
-}
-.live-punch-identity {
-  font-size: clamp(16px, 2vw, 27px);
-  font-weight: 450;
-  color: #e4eadf;
+.live-history-overflow {
+  margin: 8px 2px 0;
+  color: #c7d3c7;
+  font-size: 11px;
   line-height: 1.35;
 }
 .live-total {
-  text-align: right;
   display: flex;
   flex-direction: column;
-  padding-bottom: 3px;
   gap: 4px;
+  align-items: flex-end;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #101c18cf;
 }
 .live-total strong {
-  font-size: clamp(52px, 7vw, 104px);
+  font-size: clamp(48px, 5vw, 76px);
   font-weight: 500;
   letter-spacing: -0.055em;
-  line-height: 0.9;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .live-total > span {
-  color: #d0dac8;
+  color: #c7d3c7;
   font-size: 12px;
 }
-.live-feedback-note {
-  grid-column: 1 / -1;
-  font-size: 10px;
-  color: #a2b09e;
-  letter-spacing: 0.1px;
-}
+/* Text appears on the first render. A short accent never queues or delays it. */
 @keyframes detection-arrives {
   from {
-    opacity: 0.45;
-    transform: translateY(5px);
+    box-shadow: inset 0 0 0 1px #ffffff40;
   }
   to {
-    opacity: 1;
-    transform: translateY(0);
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+@keyframes detection-receipt {
+  from {
+    visibility: visible;
+  }
+  to {
+    visibility: hidden;
   }
 }
 @media (max-width: 700px) {
   .live-feedback {
-    padding: 40px 18px 18px;
-    gap: 12px 18px;
+    inset: auto 12px 12px;
+    gap: 10px;
   }
-  .live-punch {
+  .live-history {
+    width: min(260px, calc(100% - 66px));
+    padding: 9px;
+    border-radius: 10px;
+  }
+  .live-history-heading {
+    padding-bottom: 6px;
+    gap: 5px;
+    font-size: 10px;
+    min-height: 19px;
+  }
+  .live-history-order {
+    font-size: 9px;
+  }
+  .detection-tick {
+    font-size: 10px;
+    min-width: 20px;
+    padding: 1px 4px;
+  }
+  .punch-history-item {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    padding: 5px 6px;
     gap: 6px;
   }
-  .live-eyebrow {
+  .punch-history-item:not(.newest-batch):nth-child(n + 4) {
+    display: none;
+  }
+  .punch-history-number {
+    height: 25px;
+    font-size: 18px;
+  }
+  .punch-history-identity strong {
+    font-size: 17px;
+  }
+  .latest .punch-history-identity strong {
+    font-size: 21px;
+  }
+  .punch-history-identity > span,
+  .punch-history-time {
     font-size: 9px;
-    letter-spacing: 1.5px;
   }
-  .live-punch-name {
-    font-size: clamp(30px, 8vw, 52px);
+  .live-history-empty strong {
+    font-size: 23px;
   }
-  .live-punch-name.waiting {
-    font-size: 27px;
+  .live-history-empty > span {
+    font-size: 11px;
   }
-  .live-punch-identity {
-    font-size: 14px;
+  .live-tracking-note {
+    padding-top: 7px;
+    font-size: 9px;
+  }
+  .live-total {
+    padding: 9px;
   }
   .live-total strong {
-    font-size: 52px;
+    font-size: 38px;
   }
   .live-total > span {
-    font-size: 10px;
-    max-width: 62px;
-  }
-  .live-feedback-note {
     font-size: 9px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .live-punch-name.detected {
+  .punch-history-item {
     animation: none;
   }
 }
-
-/* Color identifies physical hand, never whether a punch has correct form. */
-.live-feedback.hand-left .live-punch-name.detected,
-.live-feedback.hand-left .live-eyebrow {
-  color: var(--hand-left);
-}
-.live-feedback.hand-right .live-punch-name.detected,
-.live-feedback.hand-right .live-eyebrow {
-  color: var(--hand-right);
-}
-.live-feedback .live-punch-name.detected {
-  font-size: clamp(36px, 5vw, 72px);
-}
-.live-feedback {
-  padding-top: 26px;
-  background: linear-gradient(transparent, #08100d35 45%, #08100da0);
-}
-.live-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 28px;
-}
-.detection-tick {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 34px;
-  padding: 3px 7px;
-  border-radius: 6px;
-  background: currentColor;
-  font-size: 17px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.15;
-  letter-spacing: 0;
-  text-shadow: none;
-  animation: detection-tick 450ms ease-out;
-}
-.hand-left .detection-tick {
-  background: var(--hand-left);
-  color: #092235;
-}
-.hand-right .detection-tick {
-  background: var(--hand-right);
-  color: #351a09;
-}
-@keyframes detection-tick {
-  from {
-    transform: scale(1.25);
-    box-shadow: 0 0 0 5px #ffffff20;
+/* Keep the upper timer and tracking indicators clear on short displays. */
+@media (max-height: 650px) {
+  .punch-history-item:not(.newest-batch):nth-child(n + 3) {
+    display: none;
   }
-  to {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 transparent;
+  .live-history {
+    padding: 9px;
   }
-}
-@media (prefers-reduced-motion: reduce) {
-  .detection-tick {
-    animation: none;
+  .latest .punch-history-identity strong {
+    font-size: 24px;
   }
 }

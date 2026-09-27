@@ -1,33 +1,34 @@
-# Next test: one natural 30-second round
+# Next test: the punch log and your coaching labels
 
-Record at your normal pace. There is no required count or technique grade.
+## 1. Check feedback from boxing distance
 
-## Record
+Open [Practice](http://127.0.0.1:5173), choose your lead hand, keep **30s**, and enable the camera. Tracking is on: blue means the estimated physical left hand, orange the right. **Record round** gives you eight seconds to step back; no second click is needed.
 
-1. Open [Practice](http://127.0.0.1:5173). Keep **30s** and choose **Left hand leads** or **Right hand leads**. Keep free practice; **More options** holds secondary settings.
-2. Click **Enable camera**. Tracking is already on: **blue is the model’s left hand, orange its right**. Check that L/R follow your physical hands. Dashed/amber points mean weak observations; missing points are omitted. Neither solid lines nor colors certify correct technique.
-3. Keep your head, hips and extended hands in view. Click **Record round** and step back during the eight-second countdown. No second click is needed. **Focus view** is optional.
-4. Try jabs, crosses, hooks and uppercuts, then faster repetitions. Look for **+1** (or a batch count), the punch name/hand and the total. Note misses or wrong names rather than assuming the intended sequence happened.
-5. Spend the last few seconds without punching: lower your hands and return to guard. Watch for false counts. Let the timer finish or click **Stop & save**.
+Throw a few comfortable singles, repeated jabs, a short combination, hooks and uppercuts. The **Detected / Newest first** panel keeps recent detections, including repeated punches. Each row has its hand, number/name, detection sequence and source time. A **+N** accent marks an arriving batch; names appear together. Pause briefly: the history should stay readable. Tracking warnings should not erase it.
 
-## Review
+Leave the last few seconds without punching. Look for false counts during guard changes or hand lowering. **Stop & save**, or let the timer end. The camera turns off and original video opens immediately; no second analysis is required.
 
-The camera should turn off and the original live results should appear immediately. **No second pass starts automatically.** Confirm **Saved on this device**.
+Check these three things:
 
-Watch the original video with tracking visible. Use **0.5×**, frame stepping, or **Focus video**. Clicking a detected punch returns to the player; switching overlays should leave the video visible and at the same position.
+- Can you read the latest names from your stance without moving toward the laptop?
+- Do consecutive punches get distinct rows quickly enough to follow?
+- Do physical L/R match your hands, and which movements were missed or counted incorrectly?
 
-Optional **Re-run analysis** offers **Analyze recording** or **Analyze again**. **Show video analysis** / **Show original** compare results; different counts are not proof of improvement.
+## 2. Label a few existing clips
 
-Saved-round tiles show duration and detected count. The trash button offers **Undo**; **Recently deleted** can restore the round and its video later. Permanent deletion requires confirmation.
+In **Saved rounds**, choose a recording and click **Coach review**. The original video appears without prediction overlays.
 
-## Report back
+1. Play the clip, use **0.5×** if useful, and inspect the marked moment. Confirm the physical hand and action, or choose **Not a punch** / **Can't tell**.
+2. For a straight, judge the **other hand**: **Guard held**, **Needs work**, **Can't tell**, or **Not this drill/style**. The first two mean an isolated high-guard straight with the hand clearly visible. A combination, intentional defense or different guard can be not applicable.
+3. Use **Undo** for a misclick. **Next** can leave a card unanswered. Answers save locally; reload once to check they remain.
+4. Use **Find a missed punch**, scrub the full video, and **Review this moment** to add something the detector missed. Adding a window does not label it automatically.
 
-```text
-Could I see the skeleton, timer, punch name and +1 from my stance?
-Missed or wrong punch names, roughly when:
-Did L/R follow my actual hands?
-Any counts while I was not punching?
-Camera off, video saved and replay stayed visible?
-```
+Start with 10–15 useful examples if you have them. Don't force guard judgments on mixed-action clips. A short new isolated jab/cross drill can supply clearer examples later; no need to redo every saved recording now.
 
-Keep **Evidence JSON** and **Export video** together under **Export & details**. Optional video-analysis reports export separately. Everything stays local.
+Labels are supervised review material, not an automatic model update or a technique score. Proposal windows are not verified action boundaries or a complete punch inventory. No video is uploaded.
+
+## Replay and backup
+
+Closing Coach review returns to the original replay with tracking available. **Re-run analysis** remains optional; different counts alone do not prove improvement. Saved-round remove buttons support **Undo** and **Recently deleted**.
+
+**Export labels** saves coaching judgments. Under the normal review's **Export & details**, keep **Evidence JSON** and **Export video** together for a backup. Browser storage stays local and can be cleared by the browser.

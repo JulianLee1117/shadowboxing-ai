@@ -1,5 +1,13 @@
 import { parseArgs } from "node:util";
-import { readFile, writeFile, mkdir, realpath } from "node:fs/promises";
+import {
+  readFile,
+  writeFile,
+  mkdir,
+  realpath,
+  mkdtemp,
+  rm,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
@@ -23,7 +31,7 @@ if (values.help || positionals.length !== 1 || !values.output) {
   );
   process.exit(values.help ? 0 : 2);
 }
-let server;
+let server, cacheDirectory;
 try {
   const sessionPath = await realpath(positionals[0]);
   const input = await readFile(sessionPath);
@@ -43,9 +51,14 @@ try {
     throw new Error(
       "This session has a video offset. Supply the verified pose-to-session offset explicitly.",
     );
+  // SSR tooling has a different Vite config hash from the running studio.
+  // Never let its optimizer invalidate the studio's lazy browser modules.
+  cacheDirectory = await mkdtemp(path.join(tmpdir(), "corner-replay-vite-"));
   server = await createServer({
     root,
     configFile: false,
+    cacheDir: cacheDirectory,
+    optimizeDeps: { noDiscovery: true, include: [] },
     server: { middlewareMode: true, watch: null },
     appType: "custom",
     logLevel: "error",
@@ -83,5 +96,10 @@ try {
   console.error(`Replay failed: ${error.message}`);
   process.exitCode = 2;
 } finally {
-  await server?.close();
+  try {
+    await server?.close();
+  } finally {
+    if (cacheDirectory)
+      await rm(cacheDirectory, { recursive: true, force: true });
+  }
 }

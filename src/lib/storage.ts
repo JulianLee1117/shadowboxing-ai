@@ -1,5 +1,11 @@
 import type { Session } from "./types";
 import type { RoundAnalysisReport } from "./roundAnalysis";
+import {
+  fingerprintCoachSource,
+  serializeCoachSource,
+  validateCoachReview,
+  type CoachReviewData,
+} from "./coachReview";
 
 const DB_NAME = "corner-local-v1";
 function database(): Promise<IDBDatabase> {
@@ -47,27 +53,35 @@ export interface TrashedRound {
 export async function saveSession(
   session: Session,
   options: { requireExisting?: boolean } = {},
-) {
+): Promise<Session> {
   const db = await database();
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<Session>((resolve, reject) => {
     const tx = db.transaction(["sessions", "trash"], "readwrite");
-    const exists = tx.objectStore("sessions").getKey(session.id);
+    const current = tx.objectStore("sessions").get(session.id);
     const removed = tx.objectStore("trash").getKey(session.id);
     let inTrash = false;
     let missing = false;
+    let saved: Session;
     removed.onsuccess = () => {
       if (removed.result !== undefined) {
         inTrash = true;
         tx.abort();
-      } else if (options.requireExisting && exists.result === undefined) {
+      } else if (options.requireExisting && current.result === undefined) {
         // An annotation edit in a stale tab must not recreate a purged video.
         missing = true;
         tx.abort();
-      } else tx.objectStore("sessions").put(session);
+      } else {
+        // Existing-round edits currently update annotation fields. Their stale
+        // snapshot must not replace independently saved coach labels.
+        saved = options.requireExisting
+          ? { ...session, coachReview: (current.result as Session).coachReview }
+          : session;
+        tx.objectStore("sessions").put(saved);
+      }
     };
     tx.oncomplete = () => {
       db.close();
-      resolve();
+      resolve(saved);
     };
     tx.onerror = tx.onabort = () => {
       db.close();
@@ -79,6 +93,95 @@ export async function saveSession(
               ? "This round was deleted in another tab. Export your edits before closing."
               : "Could not save locally. Storage may be full; export your round before closing.",
         ),
+      );
+    };
+  });
+}
+
+/**
+ * Patch only coaching labels onto the latest stored round. Source hashing runs
+ * before the transaction; synchronous evidence checks keep the IDB write atomic.
+ * Video size/type are compared, not rehashed: same-ID video replacement is not
+ * supported by the app. The original Blob always comes from the stored round.
+ */
+export async function saveCoachReview(
+  caller: Session,
+  proposed: CoachReviewData,
+  expectedReview: CoachReviewData | undefined,
+): Promise<Session> {
+  const review = structuredClone(proposed);
+  const expected = JSON.stringify(expectedReview ?? null);
+  const sourceEvidence = serializeCoachSource(caller);
+  const videoMetadata = caller.video
+    ? { size: caller.video.size, type: caller.video.type }
+    : null;
+  if (!videoMetadata)
+    throw new Error("Coach labels require the saved original video.");
+  const sourceFingerprint = await fingerprintCoachSource(caller);
+  validateCoachReview(review, caller, undefined, sourceFingerprint);
+
+  const db = await database();
+  return new Promise<Session>((resolve, reject) => {
+    const tx = db.transaction(["sessions", "trash"], "readwrite");
+    const store = tx.objectStore("sessions");
+    const current = store.get(caller.id);
+    const removed = tx.objectStore("trash").getKey(caller.id);
+    let merged: Session | undefined;
+    let failure: Error | undefined;
+    const abort = (message: string) => {
+      failure = new Error(message);
+      tx.abort();
+    };
+    // Requests execute in order in this transaction: current is ready here.
+    removed.onsuccess = () => {
+      const stored = current.result as Session | undefined;
+      if (removed.result !== undefined) {
+        abort("Restore this round from Recently deleted before editing it.");
+        return;
+      }
+      if (!stored) {
+        abort("This round was deleted. Export your draft, then reopen review.");
+        return;
+      }
+      if (
+        serializeCoachSource(stored) !== sourceEvidence ||
+        stored.video?.size !== videoMetadata.size ||
+        stored.video?.type !== videoMetadata.type
+      ) {
+        abort(
+          "This round's original evidence changed. Export your draft, then reopen review.",
+        );
+        return;
+      }
+      if (JSON.stringify(stored.coachReview ?? null) !== expected) {
+        abort(
+          "Coach labels changed in another view. Export your draft, then reopen review.",
+        );
+        return;
+      }
+      try {
+        validateCoachReview(review, stored, undefined, sourceFingerprint);
+        merged = { ...stored, coachReview: review };
+        store.put(merged);
+      } catch (error) {
+        abort(
+          error instanceof Error
+            ? error.message
+            : "Could not save coach labels.",
+        );
+      }
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve(merged!);
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(
+        failure ??
+          new Error(
+            "Coach labels could not be saved. Storage may be full; export your draft before closing.",
+          ),
       );
     };
   });

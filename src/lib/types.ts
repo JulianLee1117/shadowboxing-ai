@@ -102,6 +102,7 @@ export interface Session {
   skippedFrames: number;
   schemaVersion: "1.0";
   annotationsComplete?: boolean;
+  coachReview?: import("./coachReview").CoachReviewData;
   modelManifest?: unknown;
   detectorVersion?: string;
   capture?: {

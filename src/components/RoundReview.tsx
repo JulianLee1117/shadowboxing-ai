@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { PoseOverlay } from "./PoseOverlay";
 import { RoundLibrary } from "./RoundLibrary";
+import { CoachReview } from "./CoachReview";
 import { ChoiceGroup, UtilityPanel } from "./ChoiceGroup";
 import { punchName, punchNotation } from "../lib/punches";
 import "./RoundReview.css";
@@ -29,6 +30,7 @@ import { summarizeTrackingTrust } from "../lib/trackingTrust";
 import { combinationLabel, DRILLS, type DrillId } from "../lib/drills";
 import { downloadBlob, exportSession, formatTime } from "../lib/storage";
 import type { Session, SessionAnnotation } from "../lib/types";
+import type { CoachReviewData } from "../lib/coachReview";
 
 type Props = {
   sessions: Session[];
@@ -37,6 +39,11 @@ type Props = {
   unsavedIds: string[];
   onSelect: (session: Session) => void;
   onUpdate: (session: Session) => Promise<void>;
+  onCoachReviewUpdate: (
+    session: Session,
+    expectedReview?: CoachReviewData,
+  ) => Promise<void>;
+  onCoachNavigationLockChange?: (locked: boolean) => void;
   onDeleted: (id: string) => void;
   onRestored: (session: Session) => void;
   onNotice: (message: string) => void;
@@ -50,12 +57,16 @@ export function RoundReview({
   unsavedIds,
   onSelect,
   onUpdate,
+  onCoachReviewUpdate,
+  onCoachNavigationLockChange,
   onDeleted,
   onRestored,
   onNotice,
   onPractice,
 }: Props) {
   const [time, setTime] = useState(0);
+  const [coachSessionId, setCoachSessionId] = useState<string | null>(null);
+  const showingCoach = !!selected && coachSessionId === selected.id;
   const [trashCount, setTrashCount] = useState(0);
   const [focused, setFocused] = useState(false);
   const focusButtonRef = useRef<HTMLButtonElement>(null);
@@ -197,7 +208,7 @@ export function RoundReview({
   }, [sessionId, videoBlob]);
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = playbackRate;
-  }, [videoUrl, playbackRate]);
+  }, [videoUrl, playbackRate, showingCoach]);
   const sync = useCallback(
     (video: HTMLVideoElement) => {
       const start = offset / 1000,
@@ -237,7 +248,7 @@ export function RoundReview({
       if (callback !== null) video.cancelVideoFrameCallback?.(callback);
       cancelAnimationFrame(raf);
     };
-  }, [videoUrl, sync]);
+  }, [videoUrl, sync, showingCoach]);
   useEffect(() => {
     if (!playing || videoUrl) return;
     let previous = performance.now();
@@ -284,6 +295,19 @@ export function RoundReview({
   const frame = nearest && Math.abs(nearest.t - time) <= 100 ? nearest : null;
   const tracking = frame ? assessArmTracking(frame) : null;
 
+  if (showingCoach && selected)
+    return (
+      <section className="review round-review">
+        <CoachReview
+          key={selected.id}
+          session={selected}
+          onUpdate={onCoachReviewUpdate}
+          onNavigationLockChange={onCoachNavigationLockChange}
+          onClose={() => setCoachSessionId(null)}
+        />
+      </section>
+    );
+
   return (
     <section
       className={`review round-review ${focused ? "review-is-focused" : ""}`}
@@ -305,9 +329,30 @@ export function RoundReview({
                 </p>
               )}
           </div>
-          <button className="button secondary" onClick={onPractice}>
-            New round
-          </button>
+          <div className="review-heading-actions">
+            {selected?.video && selected.source !== "demo" && (
+              <button
+                className="button secondary"
+                disabled={
+                  saveState !== "saved" ||
+                  unsavedIds.includes(selected.id) ||
+                  analysis.running
+                }
+                onClick={() => {
+                  videoRef.current?.pause();
+                  setPlaying(false);
+                  leaveFocus();
+                  setCoachSessionId(selected.id);
+                  window.scrollTo({ top: 0, behavior: "instant" });
+                }}
+              >
+                Coach review
+              </button>
+            )}
+            <button className="button secondary" onClick={onPractice}>
+              New round
+            </button>
+          </div>
         </div>
         <RoundLibrary
           sessions={sessions}
@@ -418,7 +463,7 @@ export function RoundReview({
                         e.currentTarget.videoWidth /
                           e.currentTarget.videoHeight,
                       );
-                    e.currentTarget.currentTime = offset / 1000;
+                    e.currentTarget.currentTime = (time + offset) / 1000;
                     sync(e.currentTarget);
                   }}
                   onSeeking={(e) => sync(e.currentTarget)}

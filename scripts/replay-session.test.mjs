@@ -1,12 +1,20 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { createServer } from "vite";
 import { replayEvidence } from "./lib/replay-evidence.mjs";
 
-let server, options, source;
+let server, options, source, cacheDirectory;
 before(async () => {
+  cacheDirectory = await mkdtemp(
+    path.join(tmpdir(), "corner-replay-test-vite-"),
+  );
   server = await createServer({
     configFile: false,
+    cacheDir: cacheDirectory,
+    optimizeDeps: { noDiscovery: true, include: [] },
     server: { middlewareMode: true, watch: null },
     appType: "custom",
     logLevel: "error",
@@ -33,7 +41,14 @@ before(async () => {
     detectorVersion: "saved-version",
   };
 });
-after(async () => server?.close());
+after(async () => {
+  try {
+    await server?.close();
+  } finally {
+    if (cacheDirectory)
+      await rm(cacheDirectory, { recursive: true, force: true });
+  }
+});
 
 function deepFreeze(obj) {
   if (obj && typeof obj === "object") {

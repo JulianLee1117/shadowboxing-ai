@@ -4,6 +4,8 @@ A local laptop-camera practice app: record a short round, replay your video, and
 
 **Research prototype, September 26, 2026.** Pose inference and saved-video analysis run on your device. Recognition and technique coaching have not been validated. No technique grades or corrective judgments are enabled.
 
+The live view now keeps a compact fighting-game-style detection history. Saved videos include **Coach review** for local action corrections and one narrow guard rubric; labels remain separate from detections and do not retrain automatically. The optional native decoder has a shorter 150 ms arbitration hold with unchanged weights. See [what to test next](docs/first-user-test.md) and the [form/latency roadmap](docs/research/form-coaching-roadmap-2026-09.md).
+
 ## Run locally
 
 Use Node.js 20.19+ (22.12+ recommended) and npm.

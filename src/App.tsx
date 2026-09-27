@@ -16,7 +16,13 @@ import { ChoiceGroup, UtilityPanel } from "./components/ChoiceGroup";
 import { assessArmTracking } from "./lib/motion";
 import { ReadinessGate } from "./lib/readiness";
 import { DRILLS, type DrillId } from "./lib/drills";
-import { formatTime, listSessions, saveSession } from "./lib/storage";
+import {
+  formatTime,
+  listSessions,
+  saveCoachReview,
+  saveSession,
+} from "./lib/storage";
+import type { CoachReviewData } from "./lib/coachReview";
 import type { ModelVariant, Session, Stance } from "./lib/types";
 
 function App() {
@@ -49,6 +55,7 @@ function App() {
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const [notice, setNotice] = useState<string | null>(null);
+  const [coachNavigationLocked, setCoachNavigationLocked] = useState(false);
   const [saveStates, setSaveStates] = useState<
     Record<string, "saving" | "saved" | "error">
   >({});
@@ -68,10 +75,12 @@ function App() {
       saveRevisions.current[session.id] = revision;
       setSaveStates((old) => ({ ...old, [session.id]: "saving" }));
       try {
-        await saveSession(session, { requireExisting });
+        const saved = await saveSession(session, { requireExisting });
         persistedIds.current.add(session.id);
-        if (saveRevisions.current[session.id] === revision)
+        if (saveRevisions.current[session.id] === revision) {
           setSaveStates((old) => ({ ...old, [session.id]: "saved" }));
+          return saved;
+        }
       } catch (e) {
         if (saveRevisions.current[session.id] !== revision) return;
         setSaveStates((old) => ({ ...old, [session.id]: "error" }));
@@ -271,6 +280,7 @@ function App() {
     }
   };
   const navigate = async (next: "practice" | "review") => {
+    if (coachNavigationLocked) return;
     cancelCountdown();
     await studio.stop();
     if (next === "review" && !selected) setSelected(sessions[0] ?? null);
@@ -279,7 +289,63 @@ function App() {
   const updateSession = async (session: Session) => {
     setSelected(session);
     setSessions((old) => old.map((s) => (s.id === session.id ? session : s)));
-    await persist(session, persistedIds.current.has(session.id));
+    const saved = await persist(session, persistedIds.current.has(session.id));
+    if (saved) {
+      // Annotation writes preserve the latest independently saved coach labels.
+      // Keep local video/evidence references and any newer optimistic edits.
+      setSelected((current) =>
+        current?.id === saved.id
+          ? { ...current, coachReview: saved.coachReview }
+          : current,
+      );
+      setSessions((old) =>
+        old.map((current) =>
+          current.id === saved.id
+            ? { ...current, coachReview: saved.coachReview }
+            : current,
+        ),
+      );
+    }
+  };
+  const updateCoachReview = async (
+    session: Session,
+    expectedReview?: CoachReviewData,
+  ) => {
+    if (!session.coachReview) throw new Error("Coach labels are missing.");
+    const revision = (saveRevisions.current[session.id] ?? 0) + 1;
+    saveRevisions.current[session.id] = revision;
+    const previousSaveState = saveStates[session.id] ?? "saved";
+    setSaveStates((old) => ({ ...old, [session.id]: "saving" }));
+    try {
+      // The transaction patches labels onto the latest stored evidence and
+      // annotations. Neither parent nor card UI advances before it commits.
+      const merged = await saveCoachReview(
+        session,
+        session.coachReview,
+        expectedReview,
+      );
+      // IDB clones Blobs and arrays. The atomic patch verified this immutable
+      // source, so retain its UI references to keep playback and Undo intact.
+      const saved = {
+        ...merged,
+        video: session.video,
+        frames: session.frames,
+        events: session.events,
+      };
+      persistedIds.current.add(session.id);
+      if (saveRevisions.current[session.id] === revision)
+        setSaveStates((old) => ({ ...old, [session.id]: "saved" }));
+      setSelected((current) => (current?.id === saved.id ? saved : current));
+      setSessions((old) => old.map((s) => (s.id === saved.id ? saved : s)));
+    } catch (error) {
+      // A failed label patch did not make the already saved original unsaved.
+      if (saveRevisions.current[session.id] === revision)
+        setSaveStates((old) => ({ ...old, [session.id]: previousSaveState }));
+      setNotice(
+        error instanceof Error ? error.message : "Could not save coach labels.",
+      );
+      throw error;
+    }
   };
   const tracking = studio.frame ? assessArmTracking(studio.frame) : null;
   const active = studio.running || readiness.pending || finishing;
@@ -294,7 +360,11 @@ function App() {
           href="#"
           onClick={(e) => {
             e.preventDefault();
-            if (!active && studio.status !== "loading")
+            if (
+              !active &&
+              studio.status !== "loading" &&
+              !coachNavigationLocked
+            )
               void navigate("practice");
           }}
           aria-label="Corner home"
@@ -306,14 +376,18 @@ function App() {
           <button
             aria-current={view === "practice" ? "page" : undefined}
             onClick={() => void navigate("practice")}
-            disabled={active || studio.status === "loading"}
+            disabled={
+              active || studio.status === "loading" || coachNavigationLocked
+            }
           >
             Practice
           </button>
           <button
             aria-current={view === "review" ? "page" : undefined}
             onClick={() => void navigate("review")}
-            disabled={active || studio.status === "loading"}
+            disabled={
+              active || studio.status === "loading" || coachNavigationLocked
+            }
           >
             Saved rounds
             {sessions.length > 0 && (
@@ -650,6 +724,8 @@ function App() {
             )}
             onSelect={setSelected}
             onUpdate={updateSession}
+            onCoachReviewUpdate={updateCoachReview}
+            onCoachNavigationLockChange={setCoachNavigationLocked}
             onDeleted={(id) => {
               setSessions((old) => old.filter((s) => s.id !== id));
               setSelected((current) =>

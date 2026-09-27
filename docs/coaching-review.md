@@ -1,4 +1,14 @@
-# Independent technique-review workflow
+# Local coaching labels and independent review
+
+## In-app coach cards
+
+Saved original videos now offer **Coach review**. The user is a self-reported coach; no additional credential or external reviewer is required to collect these personal judgments. Confirm physical-hand/action identity before judging the non-punching hand during an isolated high-guard straight. A detected event supplies only a navigation marker. **Find a missed punch** adds a manual window from the full video. Hooks, uppercuts, non-punches and uncertain identities receive no automatic form rubric.
+
+Answers persist separately on the session, with source/video hashes, stance, window bounds, proposal provenance and reviewer expertise `coach_self_reported`. The UI supports local playback, notes, Undo and export. Failed writes keep the card uncommitted and offer retry, draft export or discard; concurrent coaching edits are rejected, and annotation writes preserve the latest coaching labels.
+
+Exports use **`local-coach-review-1`**, with `exportState` distinguishing the current review from an unsaved attempt. They are selected user-authored clip judgments, not a complete punch inventory, independently validated action boundaries, or a direct input to the CLI schema below. “Can't tell” currently combines visual ambiguity and insufficient evidence; the richer CLI separates them. Mapping to a training dataset requires a deliberate source/context/boundary review. Labels never activate a model automatically. Further independent review is useful before broader corrective-coaching claims; agreement alone is not proven coaching benefit.
+
+## Independent review packets
 
 `ml/coaching.py` prepares a local review packet from human action annotations and the original video. It collects evidence for a draft rubric; it does not evaluate form, issue advice, or turn detector output into ground truth. The first two criteria are `guard_recovery` and `non_punching_hand_guard`, restricted to an independently identified isolated straight in an agreed high-guard drill. See the [criterion specification](research/technique-feedback-spec.md).
 
