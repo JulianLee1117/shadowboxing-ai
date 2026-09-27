@@ -460,3 +460,49 @@ test("original detections cannot form combinations across wholly missing saved t
   ).toHaveCount(0);
   await expect(page.getByText(/Uncertain tracking ·/)).toBeVisible();
 });
+
+test("zero-length failed import is preserved without starting automatic analysis", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    const failed = w.__makeSession("failed-import", "2026-02-02T00:00:00.000Z");
+    failed.source = "file";
+    failed.durationMs = 0;
+    failed.frames = [];
+    failed.events = [];
+    failed.annotations = [];
+    w.__completeRound(failed);
+  });
+  await expect(
+    page.getByRole("heading", { name: "Review", exact: true }),
+  ).toBeVisible();
+  await expect.poll(async () => (await dbState(page)).sessions.length).toBe(2);
+  // Waiting for cache loading to finish also lets the auto-analysis effect run.
+  await expect(
+    page.getByRole("button", { name: "Analyze recording", exact: true }),
+  ).toBeEnabled();
+  expect(await page.evaluate(() => (window as any).__analysisJobs.length)).toBe(
+    0,
+  );
+  await expect(
+    page.getByText("Analyzing locally…", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator(".analysis-error")).toHaveCount(0);
+  await page.getByText("Export & details", { exact: true }).click();
+  const evidence = await exported(page, "Evidence JSON");
+  expect(evidence).toMatchObject({
+    id: "failed-import",
+    source: "file",
+    durationMs: 0,
+    frames: [],
+    events: [],
+    annotations: [],
+  });
+  const stored = (await dbState(page)).sessions.find(
+    (s: { id: string }) => s.id === "failed-import",
+  );
+  expect(stored?.videoBytes).toBe(3);
+  expect((await dbState(page)).analyses).toEqual([]);
+});

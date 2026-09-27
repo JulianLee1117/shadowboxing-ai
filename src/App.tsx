@@ -57,8 +57,15 @@ function App() {
         ...old.filter((s) => s.id !== session.id),
       ]);
       setSelected(session);
+      // A failed import may still preserve its original video in a zero-length
+      // round. Retain that evidence without launching another failing analysis.
       setAutoAnalyzeId(
-        session.video && session.source !== "demo" ? session.id : null,
+        session.video &&
+          session.source !== "demo" &&
+          Number.isFinite(session.durationMs) &&
+          session.durationMs > 0
+          ? session.id
+          : null,
       );
       setView("review");
       void persist(session);
