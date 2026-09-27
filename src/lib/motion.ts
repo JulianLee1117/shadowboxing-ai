@@ -13,7 +13,7 @@ type Hand = PunchEvent["hand"];
 type Point = { x: number; y: number };
 
 /** Include in saved evidence so replays can identify the counting rules used. */
-export const DETECTOR_VERSION = "projected-straight-v4-observed-cycles";
+export const DETECTOR_VERSION = "projected-straight-v6-observed-repeats";
 
 export interface ArmTrackingState {
   hand: Hand;
@@ -42,6 +42,8 @@ export const MOTION_LIMITS = {
   minimumEventMs: 180,
   maximumEventMs: 1800,
   minimumRecoveryMs: 30,
+  minimumRetractionFraction: 0.5,
+  maximumRepeatPeakGapMs: 650,
 } as const;
 
 const TORSO_JOINTS = [
@@ -322,7 +324,17 @@ export function robustOutboundPath(
   };
 }
 
+/** Accepted full-stroke evidence with a fixed lifetime; repeat-only events cannot renew it. */
+interface RepeatAnchor {
+  origin: ArmSample;
+  peakMs: number;
+  expiresAtMs: number;
+}
+
 interface Candidate {
+  repeatAnchor: RepeatAnchor | null;
+  fullPeakFrames: number;
+  fullSupportedPeak: boolean;
   origin: ArmSample;
   startMs: number;
   peakMs: number;
@@ -333,7 +345,7 @@ interface Candidate {
   pathLength: number;
   pathToPeak: number;
   pathSamples: ArmSample[];
-  pendingPeak: { before: ArmSample; peak: ArmSample } | null;
+  pendingPeak: { before: ArmSample; peak: ArmSample; full: boolean } | null;
   supportedPeak: boolean;
   recovering: boolean;
   recoveryStartMs: number | null;
@@ -341,6 +353,7 @@ interface Candidate {
 }
 
 interface ArmState {
+  repeatAnchor: RepeatAnchor | null;
   previous: ArmSample | null;
   acquisitionSamples: ArmSample[];
   rest: ArmSample | null;
@@ -351,6 +364,7 @@ interface ArmState {
 }
 
 const freshArm = (): ArmState => ({
+  repeatAnchor: null,
   previous: null,
   acquisitionSamples: [],
   rest: null,
@@ -398,6 +412,30 @@ function observedTrough(samples: ArmSample[]): ArmSample | null {
     }
   }
   return null;
+}
+
+/** A guarded reference may follow a coherent observed inward run, never extension. */
+function coherentInward(samples: readonly ArmSample[]): boolean {
+  if (samples.length < MOTION_LIMITS.minimumRestFrames) return false;
+  const latest = samples[samples.length - 1];
+  let start = samples.length - 1;
+  while (start > 0) {
+    const earlier = samples[start - 1];
+    const later = samples[start];
+    if (
+      earlier.angle > 130 ||
+      later.reach > earlier.reach ||
+      later.angle > earlier.angle
+    )
+      break;
+    start -= 1;
+    if (
+      samples.length - start >= MOTION_LIMITS.minimumRestFrames &&
+      latest.t - earlier.t >= MOTION_LIMITS.minimumRestMs
+    )
+      return true;
+  }
+  return false;
 }
 
 /**
@@ -549,6 +587,9 @@ export class MotionEngine {
         sample.reach > previous.reach
       ) {
         state.candidate = {
+          repeatAnchor: state.repeatAnchor,
+          fullPeakFrames: 0,
+          fullSupportedPeak: false,
           origin: state.rest!,
           startMs: previous.t,
           peakMs: sample.t,
@@ -573,14 +614,14 @@ export class MotionEngine {
       // extended hand cannot rearm, and outgoing motion must not drag the origin.
       if (ready) {
         if (
-          state.readyFromMotion &&
+          (state.readyFromMotion || coherentInward(state.acquisitionSamples)) &&
           sample.angle <= 130 &&
           sample.reach < state.rest!.reach &&
           sample.angle <= state.rest!.angle
         ) {
-          // Motion-based acquisition can precede the end of inward travel.
-          // Follow only observed inward motion with continued elbow flexion;
-          // freezing an early return would understate the next excursion.
+          // Follow an already-ready guard only farther inward with elbow flexion.
+          // Static acquisition additionally needs a coherent observed run; a
+          // moving wrist must not expire solely because its old guard moved.
           state.rest = sample;
           return null;
         }
@@ -627,8 +668,30 @@ export class MotionEngine {
         candidate.peakReach - sample.reach > 0.14 &&
         sample.angle < candidate.peakAngle - 12
       ) {
-        if (candidate.peakFrames < 2 && !candidate.supportedPeak) {
-          this.arms[hand] = freshArm();
+        // Earlier qualifying samples must not authorize a later selected peak
+        // outside the repeat window. Isolated full qualification is unchanged.
+        const fullQualified =
+          candidate.fullPeakFrames >= 2 || candidate.fullSupportedPeak;
+        const repeatPeakInWindow =
+          candidate.repeatAnchor !== null &&
+          candidate.peakMs <= candidate.repeatAnchor.expiresAtMs;
+        if (
+          (candidate.peakFrames < 2 && !candidate.supportedPeak) ||
+          (!fullQualified && !repeatPeakInWindow)
+        ) {
+          // Keep only directly observed recent acquisition evidence, never a
+          // ready reference or rejected peak. Tracking/timing resets still erase it.
+          this.arms[hand] = {
+            ...freshArm(),
+            previous: sample,
+            acquisitionSamples: candidate.pathSamples
+              .filter(
+                (value) =>
+                  sample.t - value.t <=
+                  MOTION_LIMITS.maximumAcquisitionWindowMs,
+              )
+              .slice(-MOTION_LIMITS.maximumAcquisitionSamples),
+          };
           return null;
         }
         const chord = distance(candidate.origin.wrist, candidate.peakWrist);
@@ -648,8 +711,17 @@ export class MotionEngine {
       }
     }
     if (!candidate.recovering) return null;
+    // Confirm a flexed retraction, independently of returning to the old guard.
+    // Retain the previous close-origin criterion for shorter observed excursions.
     const recovered =
-      sample.angle <= 130 && sample.reach <= candidate.origin.reach + 0.2;
+      sample.angle <= 130 &&
+      sample.reach <=
+        Math.max(
+          candidate.origin.reach + 0.2,
+          candidate.origin.reach +
+            (candidate.peakReach - candidate.origin.reach) *
+              (1 - MOTION_LIMITS.minimumRetractionFraction),
+        );
     if (!recovered) {
       candidate.recoveryFrames = 0;
       candidate.recoveryStartMs = null;
@@ -691,28 +763,39 @@ export class MotionEngine {
       detectedAtMs: sample.t,
       score,
       extension,
-      // Describes return to this repetition's origin, never a correctness score.
+      // Spatial return to the origin observed by detectedAtMs, not a form score
+      // or a claim about whether the hand returns later.
       guardReturn:
         distance(sample.wrist, candidate.origin.wrist) <= 0.28
           ? "returned"
           : "not-observed",
       experimental: true,
     };
-    // Confirmed return already separates two movements. Preserve its real last
-    // sample rather than discarding that evidence and forcing a fast double jab
-    // to wait for another three quiet frames. No extra frames/time are invented.
-    // Uncertain return or later occlusion still requires fresh acquisition.
-    this.arms[hand] =
-      event.guardReturn === "returned"
-        ? {
-            ...freshArm(),
-            previous: sample,
-            rest: sample,
-            restStartMs: sample.t,
-            restFrames: 1,
-            readyFromMotion: true,
-          }
-        : freshArm();
+    // Confirmed flexed retraction already separates two movements. Preserve its
+    // actual last sample without requiring another quiet guard or spatial return.
+    // Only farther inward observations may update it; tracking loss still clears it.
+    this.arms[hand] = {
+      ...freshArm(),
+      // Only independently full-qualified accepted evidence creates a new
+      // anchor. A repeat may retain its original origin/deadline, never move them.
+      repeatAnchor:
+        candidate.fullPeakFrames >= 2 || candidate.fullSupportedPeak
+          ? {
+              origin: candidate.origin,
+              peakMs: candidate.peakMs,
+              expiresAtMs:
+                candidate.peakMs + MOTION_LIMITS.maximumRepeatPeakGapMs,
+            }
+          : candidate.repeatAnchor &&
+              sample.t <= candidate.repeatAnchor.expiresAtMs
+            ? candidate.repeatAnchor
+            : null,
+      previous: sample,
+      rest: sample,
+      restStartMs: sample.t,
+      restFrames: 1,
+      readyFromMotion: true,
+    };
     return event;
   }
 
@@ -722,7 +805,7 @@ export class MotionEngine {
     previous: ArmSample,
   ): void {
     if (candidate.pendingPeak) {
-      const { before, peak } = candidate.pendingPeak;
+      const { before, peak, full } = candidate.pendingPeak;
       const support = MOTION_LIMITS.minimumPeakSupportFraction;
       const reachFloor =
         candidate.origin.reach +
@@ -743,8 +826,10 @@ export class MotionEngine {
         sample.reach >= reachFloor &&
         before.angle >= angleFloor &&
         sample.angle >= angleFloor
-      )
+      ) {
         candidate.supportedPeak = true;
+        if (full) candidate.fullSupportedPeak = true;
+      }
       candidate.pendingPeak = null;
     }
     if (sample.reach > candidate.peakReach) {
@@ -754,12 +839,25 @@ export class MotionEngine {
       candidate.pathToPeak = candidate.pathLength;
     }
     candidate.peakAngle = Math.max(candidate.peakAngle, sample.angle);
-    if (
+    // Isolated strokes retain the full excursion requirement. A short repeat
+    // additionally needs a recent accepted full stroke and its own real motion.
+    const full =
       sample.reach - candidate.origin.reach >= MOTION_LIMITS.minimumExtension &&
-      sample.angle >= MOTION_LIMITS.minimumPeakAngle
-    ) {
+      sample.angle >= MOTION_LIMITS.minimumPeakAngle;
+    const anchor = candidate.repeatAnchor;
+    const repeated =
+      anchor !== null &&
+      sample.t <= anchor.expiresAtMs &&
+      sample.t > anchor.peakMs &&
+      sample.reach - candidate.origin.reach >=
+        MOTION_LIMITS.minimumExtension *
+          MOTION_LIMITS.minimumRetractionFraction &&
+      sample.reach - anchor.origin.reach >= MOTION_LIMITS.minimumExtension &&
+      sample.angle >= MOTION_LIMITS.minimumPeakAngle;
+    if (full || repeated) {
       candidate.peakFrames += 1;
-      candidate.pendingPeak = { before: previous, peak: sample };
+      if (full) candidate.fullPeakFrames += 1;
+      candidate.pendingPeak = { before: previous, peak: sample, full };
     }
   }
 }

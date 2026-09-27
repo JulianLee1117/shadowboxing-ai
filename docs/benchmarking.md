@@ -50,7 +50,7 @@ The initial app only detects experimental jab/cross events. The correct first re
 
 ## Optional RTMPose / RTMW extraction
 
-`ml/extract.py` is an optional saved-video adapter targeting **rtmlib 0.0.16**, with pinned dependencies in `ml/requirements-extract.txt`. RTMPose-M and RTMW-L inference have now run locally on the target Mac against development footage. These experiments did not justify replacing the live model. The adapter requests and verifies ONNX Runtime CPU only and makes no MPS/Core ML/browser/real-time claim. The [official rtmlib API](https://github.com/Tau-J/rtmlib) supports explicit detector/pose paths and MMPose ordering with `to_openpose=False`.
+`ml/extract.py` is an optional saved-video adapter targeting **rtmlib 0.0.16**, with pinned dependencies in `ml/requirements-extract.txt`. RTMPose-M and RTMW-L inference have run locally on the target Mac against development footage. Selected joint estimates improve over Full, but these experiments do not establish a replacement live pipeline. The adapter defaults to verified ONNX Runtime CPU sessions; `--provider coreml` explicitly opts into Core ML with CPU node fallback. The [official rtmlib API](https://github.com/Tau-J/rtmlib) supports explicit detector/pose paths and MMPose ordering with `to_openpose=False`.
 
 Create a separate environment when running that experiment:
 
@@ -61,6 +61,10 @@ python3 -m venv .venv
   --manifest /absolute/path/model-manifest.json \
   --output /absolute/path/rtm-poses.json
 ```
+
+On a supported Mac, add `--provider coreml` and choose a fresh output path. The extractor fails when Core ML is unavailable or no Core ML node execution is observed; it does not silently relabel an entirely CPU run. It retains CPU fallback for unsupported graph nodes, disables whole-session automatic fallback, and writes ONNX Runtime profiles beside the output in `OUTPUT.profiles/`. Profiles, provider settings and session-creation timing are recorded separately from frame inference timing. Keep these artifacts private with the source recording. Existing outputs or profile directories are not overwritten.
+
+Provider registration alone does not prove acceleration or identify GPU/Neural Engine execution. The adapter uses provider defaults without a compute-unit override; the [ONNX Runtime Core ML documentation](https://onnxruntime.ai/docs/execution-providers/CoreML-ExecutionProvider.html) describes the available hardware and format options. Profiles identify executed provider partitions, not their share of compute. Profiling also adds overhead. Compare identical decoded inputs, coordinates, abstentions and timing before considering a live integration: numerically different low-confidence joints can remain even when arm estimates look similar. This option is an offline research tool, not browser Core ML support or sustained real-time validation.
 
 Use `ml/models.example.json` as the manifest format. Download the chosen model artifacts from the recorded official URLs, inspect their terms, extract the ONNX files locally, and set each `path` relative to the manifest file. The example records a YOLOX-m detector and RTMPose-m body model. Input sizes are `[width,height]`. The script **does not download weights or silently select default models**. It records original source URLs, local paths, file SHA-256, input sizes, package versions, platform and input-video SHA-256. An optional `expectedSha256` is enforced. A newly computed local hash is provenance, not independent proof of artifact authenticity.
 

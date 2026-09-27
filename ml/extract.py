@@ -2,10 +2,14 @@
 
 This module never downloads weights. It requires local ONNX files and a manifest.
 Run ``python3 -m ml.extract --help``; install ml/requirements-extract.txt separately.
+CPU is the default. ``--provider coreml`` opts into Core ML with explicit CPU
+node fallback and saves execution profiles beside the output. Provider selection
+does not establish hardware acceleration, numerical parity, or live throughput.
 """
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 from importlib.metadata import version
@@ -99,6 +103,76 @@ def session_providers(model) -> dict:
             for key, attribute in (("detector", "det_model"), ("pose", "pose_model"))}
 
 
+def provider_configuration(requested: str, available: list[str]) -> dict:
+    """Validate intent before constructing sessions; never alias Core ML to CPU."""
+    if requested not in ("cpu", "coreml"):
+        raise ValueError("Provider must be cpu or coreml")
+    providers = (["CoreMLExecutionProvider", "CPUExecutionProvider"]
+                 if requested == "coreml" else ["CPUExecutionProvider"])
+    missing = [name for name in providers if name not in available]
+    if missing:
+        raise ValueError(f"Requested provider unavailable: {', '.join(missing)}")
+    return {"requested": requested, "providers": providers,
+            "providerOptions": [{} for _ in providers],
+            "computeConfiguration": "provider_defaults_no_compute_unit_override",
+            "hardwareExecution": "not_established_by_provider_selection"}
+
+
+def configure_coreml_sessions(model, manifest: dict, ort, configuration: dict,
+                              profile_directory: Path) -> dict:
+    """Use explicit ONNX Runtime sessions rather than rtmlib's fallback alias."""
+    creation_ms = {}
+    for key, attribute in (("detector", "det_model"), ("pose", "pose_model")):
+        options = ort.SessionOptions()
+        options.enable_profiling = True
+        options.profile_file_prefix = str((profile_directory / key).resolve())
+        started = time.perf_counter()
+        session = ort.InferenceSession(
+            manifest[key]["path"], sess_options=options,
+            providers=configuration["providers"],
+            provider_options=configuration["providerOptions"])
+        # CPU nodes in a partitioned Core ML graph are intentional. A runtime
+        # error must not silently rebuild/retry the whole session on CPU.
+        session.disable_fallback()
+        getattr(model, attribute).session = session
+        creation_ms[key] = (time.perf_counter() - started) * 1000
+        if session.get_providers() != configuration["providers"]:
+            raise ValueError(f"{key} session did not register the requested providers: "
+                             f"{session.get_providers()}")
+    return creation_ms
+
+
+def summarize_execution_profile(path: Path) -> dict:
+    """Count observed provider events, not assumed device placement or FLOPs."""
+    events = json.loads(path.read_text())
+    if not isinstance(events, list):
+        raise ValueError("ONNX Runtime execution profile must contain an event list")
+    providers = Counter()
+    operators = Counter()
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        args = event.get("args", {})
+        if not isinstance(args, dict):
+            continue
+        provider = args.get("provider")
+        if event.get("cat") == "Node" and isinstance(provider, str) and provider:
+            providers[provider] += 1
+            operators[f"{provider}:{args.get('op_name', 'unknown')}"] += 1
+    return {"path": str(path.resolve()), "sha256": sha256(path),
+            "executedNodeProviderEvents": dict(providers),
+            "providerOperatorEvents": dict(operators),
+            "interpretation": "Fused partition events are not operation counts, "
+                              "percent compute, specific Apple hardware, or a speed claim."}
+
+
+def verify_coreml_execution(profiles: dict) -> None:
+    if not any(profile["executedNodeProviderEvents"].get("CoreMLExecutionProvider", 0) > 0
+               for profile in profiles.values()):
+        raise ValueError("Core ML was requested, but execution profiles contain no "
+                         "CoreMLExecutionProvider nodes. Refusing an unverified CPU-only result.")
+
+
 def detector_postprocessing(model) -> dict:
     outputs = [{"name": item.name, "shape": item.shape}
                for item in model.det_model.session.get_outputs()]
@@ -127,8 +201,13 @@ def main(argv=None) -> int:
     parser.add_argument("--assume-cfr", action="store_true", help="Explicitly use decoded frame index / reported FPS when the source is known constant-frame-rate")
     parser.add_argument("--max-frames", type=int, help="Smoke-test only; the output is marked truncated")
     parser.add_argument("--frames-manifest", type=Path, help="Use ordered local images with explicit ptsMs for paired-model experiments; video remains source provenance")
+    parser.add_argument("--provider", choices=("cpu", "coreml"), default="cpu",
+                        help="ONNX Runtime provider (default: cpu). coreml requires CoreMLExecutionProvider, allows CPU node fallback, and writes verified execution profiles to OUTPUT.profiles; it makes no real-time or GPU/ANE claim")
     args = parser.parse_args(argv)
     cap = None
+    model = None
+    profiles_finalized = False
+    profile_directory = None
     try:
         manifest = load_manifest(args.manifest)
         if not args.video.is_file():
@@ -149,12 +228,18 @@ def main(argv=None) -> int:
             raise ValueError("--max-frames must be positive")
         try:
             import cv2
+            import onnxruntime as ort
             from rtmlib import RTMPose, YOLOX
         except ImportError as error:
             raise ValueError("Install the optional pinned ml/requirements-extract.txt into an isolated environment first") from error
         installed = {name: version(name) for name in ("rtmlib", "numpy", "opencv-python", "opencv-contrib-python", "onnxruntime")}
         if installed["rtmlib"] != "0.0.16":
             raise ValueError("This adapter targets rtmlib==0.0.16; use the pinned environment")
+        provider_config = provider_configuration(args.provider, ort.get_available_providers())
+        if args.provider == "coreml":
+            profile_directory = args.output.with_name(args.output.name + ".profiles")
+            # Preserve prior profiles as well as prior extraction artifacts.
+            profile_directory.mkdir(parents=True, exist_ok=False)
         # Construct explicit tools: Body's filename-based RTMO auto-selection
         # can replace a local path containing "rtmo" with a remote default.
         # Both supported families use the RTMPose SimCC tool; point count is
@@ -169,6 +254,11 @@ def main(argv=None) -> int:
         providers = session_providers(model)
         if any(value != ["CPUExecutionProvider"] for value in providers.values()):
             raise ValueError(f"Unexpected execution providers for the CPU protocol: {providers}")
+        session_creation_ms = None
+        if args.provider == "coreml":
+            session_creation_ms = configure_coreml_sessions(
+                model, manifest, ort, provider_config, profile_directory)
+            providers = session_providers(model)
         cap = None if image_frames else cv2.VideoCapture(str(args.video))
         if cap is not None and not cap.isOpened():
             raise ValueError("OpenCV could not decode this video")
@@ -235,13 +325,27 @@ def main(argv=None) -> int:
             raise ValueError("No video frames decoded")
         gaps = [b["t"] - a["t"] for a, b in zip(frames, frames[1:])]
         duration = frames[-1]["t"] + (statistics.median(gaps) if gaps else 0)
+        execution_profiles = None
+        if args.provider == "coreml":
+            execution_profiles = {
+                key: summarize_execution_profile(Path(getattr(model, attribute).session.end_profiling()))
+                for key, attribute in (("detector", "det_model"), ("pose", "pose_model"))}
+            profiles_finalized = True
+            verify_coreml_execution(execution_profiles)
         result = {"artifactType": "research-pose-series", "schemaVersion": "1.0",
                   "createdAt": datetime.now(timezone.utc).isoformat(),
                   "source": {"path": str(args.video.resolve()), "sha256": sha256(args.video)},
                   "modelManifest": manifest, "runtime": {"packages": installed,
                       "python": platform.python_version(), "platform": platform.platform(),
                       "extractorSha256": sha256(Path(__file__)),
-                      "backend": "onnxruntime", "deviceRequested": "cpu", "sessionProviders": providers,
+                      "backend": "onnxruntime", "deviceRequested": args.provider, "sessionProviders": providers,
+                      "providerConfiguration": provider_config,
+                      "registeredProviderOptions": {
+                          key: getattr(model, attribute).session.get_provider_options()
+                          for key, attribute in (("detector", "det_model"), ("pose", "pose_model"))},
+                      "sessionCreationMs": session_creation_ms,
+                      "executionProfiles": execution_profiles,
+                      "profilingEnabledDuringInference": execution_profiles is not None,
                       "detectorInputColorOrder": "BGR", "poseInputColorOrder": pose_color_order,
                       "detectorPostprocessing": detector_postprocessing(model)},
                   "timestampMode": "decoded_image_manifest_source_pts" if image_frames is not None else "assumed_cfr_frame_index" if args.assume_cfr else "opencv_pos_msec_relative_to_first_frame",
@@ -259,12 +363,12 @@ def main(argv=None) -> int:
                   "limitations": ["Pose extraction only: no punch recognition, coaching, or camera validation.",
                                   "This artifact is not a browser Session; do not relabel model as full/lite/heavy.",
                                   "Detector-plus-pose timing includes first-call warm-up; excludes video decoding.",
-                                  "CPU requested; no Core ML, MPS, browser, or real-time claim."]}
+                                  "Configured providers and observed node execution do not establish a particular GPU/ANE, numerical parity, browser support, or real-time performance."]}
         if image_frames is not None:
             result["decodedImages"] = {"manifestPath": str(args.frames_manifest.resolve()),
                                        "manifestSha256": sha256(args.frames_manifest),
                                        "manifest": image_manifest, "processedFileHashes": decoded_hashes,
-                                       "decoder": "OpenCV imread BGR; same compressed images can differ slightly from browser JPEG decoding"}
+                                       "decoder": "OpenCV imread BGR; cross-decoder pixel equivalence is not independently established"}
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("x") as output:
             output.write(json.dumps(result, indent=2, allow_nan=False) + "\n")
@@ -276,6 +380,14 @@ def main(argv=None) -> int:
     finally:
         if cap is not None:
             cap.release()
+        if profile_directory is not None and model is not None and not profiles_finalized:
+            # Finish whatever sessions were initialized even when extraction
+            # fails. Diagnostic profiles never turn a failed run into success.
+            for attribute in ("det_model", "pose_model"):
+                try:
+                    getattr(model, attribute).session.end_profiling()
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":

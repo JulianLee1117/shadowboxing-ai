@@ -356,7 +356,8 @@ describe("conservative causal event detection", () => {
     expect(events[0]).toMatchObject({
       hand: "left",
       label: "jab",
-      guardReturn: "returned",
+      // The supported retraction is detected before the later spatial return.
+      guardReturn: "not-observed",
       experimental: true,
     });
     expect(events[0].startMs).toBeLessThan(events[0].peakMs);
@@ -406,7 +407,7 @@ describe("conservative causal event detection", () => {
   });
 
   it.each([15, 30, 60])(
-    "uses a confirmed return to separate a quick jab-jab-cross at %i fps",
+    "uses observed retraction to separate a quick jab-jab-cross at %i fps",
     (fps) => {
       const frames = [
         ...cycle().slice(0, 20),
@@ -419,9 +420,6 @@ describe("conservative causal event detection", () => {
         "jab",
         "cross",
       ]);
-      expect(events.every((event) => event.guardReturn === "returned")).toBe(
-        true,
-      );
       expect(events[1].startMs).toBeGreaterThanOrEqual(events[0].endMs);
     },
   );
@@ -648,10 +646,7 @@ describe("time-based observed trough acquisition", () => {
         ...frames.map((f) => armGeometry(f, "left").reach),
       );
       expect(events[0].extension).toBeCloseTo(peakReach - originReach);
-      expect(events[0]).toMatchObject({
-        hand: "left",
-        guardReturn: "returned",
-      });
+      expect(events[0].hand).toBe("left");
     },
   );
 
@@ -889,4 +884,459 @@ it("does not remove a sustained two-sample detour or mutate the observed path", 
   const original = structuredClone(points);
   expect(measure(points).removed).toEqual([]);
   expect(points).toEqual(original);
+});
+
+describe("observed recovery independent of exact prior guard", () => {
+  function trace(
+    fps: number,
+    points: [number, number][],
+    hand: "left" | "right" = "left",
+  ) {
+    const end = points.at(-1)![0];
+    return Array.from(
+      { length: Math.floor((end * fps) / 1000) + 1 },
+      (_, i) => {
+        const t = (i * 1000) / fps;
+        let j = 0;
+        while (j + 1 < points.length - 1 && points[j + 1][0] < t) j += 1;
+        const [at, a] = points[j],
+          [bt, b] = points[j + 1];
+        return frame(t, lerp(a, b, (t - at) / (bt - at)), hand);
+      },
+    );
+  }
+
+  it.each([15, 30, 60])(
+    "separates two supported cycles with a partial flexed return at %i fps",
+    (fps) => {
+      const points: [number, number][] = [
+        [0, 0],
+        [200, 0],
+        [450, 1],
+        [550, 1],
+        [750, 0.35],
+        [850, 0.35],
+        [1100, 1],
+        [1200, 1],
+        [1450, 0.35],
+        [1550, 0.35],
+      ];
+      for (const hand of ["left", "right"] as const) {
+        const events = collect(engine(), trace(fps, points, hand));
+        expect(events.map((e) => e.hand)).toEqual([hand, hand]);
+        expect(events[0].endMs).toBeLessThan(events[1].startMs);
+        expect(events[0].guardReturn).toBe("not-observed");
+      }
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "requires retraction and flexion, not a held or slightly shortened extension at %i fps",
+    (fps) => {
+      for (const returned of [1, 0.7, 0.6]) {
+        const points: [number, number][] = [
+          [0, 0],
+          [200, 0],
+          [450, 1],
+          [550, 1],
+          [750, returned],
+          [2400, returned],
+        ];
+        expect(collect(engine(), trace(fps, points)), String(returned)).toEqual(
+          [],
+        );
+      }
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "does not turn a subthreshold partial extension into an event at %i fps",
+    (fps) => {
+      const points: [number, number][] = [
+        [0, 0],
+        [200, 0],
+        [450, 0.5],
+        [550, 0.5],
+        [750, 0.2],
+        [850, 0.2],
+        [1100, 0.5],
+        [1200, 0.5],
+        [1450, 0.2],
+        [1600, 0.2],
+      ];
+      expect(collect(engine(), trace(fps, points))).toEqual([]);
+    },
+  );
+
+  it("does not bridge a hidden arm between observed extension and partial recovery", () => {
+    const frames = trace(30, [
+      [0, 0],
+      [200, 0],
+      [450, 1],
+      [550, 1],
+      [750, 0.35],
+      [850, 0.35],
+      [1200, 0.35],
+    ]);
+    const hidden = frames.find((f) => f.t >= 600)!;
+    hidden.landmarks[JOINT.leftWrist].visibility = 0.2;
+    expect(collect(engine(), frames)).toEqual([]);
+  });
+  it.each([15, 30, 60])(
+    "retains a coherently flexing static guard before a fast departure at %i fps",
+    (fps) => {
+      for (const hand of ["left", "right"] as const) {
+        const points: [number, number][] = [
+          [0, 0.2],
+          [200, 0.2],
+          [700, 0.15],
+          [900, 1],
+          [1000, 1],
+          [1250, 0.15],
+          [1400, 0.15],
+        ];
+        const frames = trace(fps, points, hand).map((f) => {
+          if (f.t < 300) return f;
+          const shoulder =
+            f.landmarks[
+              hand === "left" ? JOINT.leftShoulder : JOINT.rightShoulder
+            ];
+          const theta = hand === "left" ? -0.7 : 0.7;
+          for (const joint of hand === "left"
+            ? [JOINT.leftElbow, JOINT.leftWrist]
+            : [JOINT.rightElbow, JOINT.rightWrist]) {
+            const p = f.landmarks[joint];
+            const x = ((p.x - shoulder.x) * f.width) / f.height,
+              y = p.y - shoulder.y;
+            p.x =
+              shoulder.x +
+              ((x * Math.cos(theta) - y * Math.sin(theta)) * f.height) /
+                f.width;
+            p.y = shoulder.y + x * Math.sin(theta) + y * Math.cos(theta);
+          }
+          return f;
+        });
+        const events = collect(engine(), frames);
+        expect(events.map((e) => e.hand)).toEqual([hand]);
+      }
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "recognizes a real extension immediately after rejecting a smaller guard gesture at %i fps",
+    (fps) => {
+      const points: [number, number][] = [
+        [0, 0.2],
+        [200, 0.2],
+        [360, 0.5],
+        [460, 0.5],
+        [500, 0.1],
+        [750, 1],
+        [850, 1],
+        [1050, 0.1],
+        [1200, 0.1],
+      ];
+      for (const hand of ["left", "right"] as const) {
+        const frames = trace(fps, points, hand);
+        const events = collect(engine(), frames);
+        expect(events.map((e) => e.hand)).toEqual([hand]);
+        expect(events[0].startMs).toBeGreaterThanOrEqual(500);
+        expect(events[0].peakMs).toBeGreaterThanOrEqual(750);
+      }
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "does not combine repeated rejected guard gestures into an observed straight peak at %i fps",
+    (fps) => {
+      const points: [number, number][] = [
+        [0, 0.2],
+        [200, 0.2],
+        [360, 0.5],
+        [460, 0.5],
+        [600, 0.1],
+        [800, 0.5],
+        [900, 0.5],
+        [1100, 0.1],
+        [1300, 0.5],
+        [1400, 0.5],
+        [1600, 0.1],
+        [1700, 0.1],
+      ];
+      expect(collect(engine(), trace(fps, points))).toEqual([]);
+    },
+  );
+
+  it("does not preserve rejected acquisition history through active-arm occlusion", () => {
+    const frames = trace(30, [
+      [0, 0.2],
+      [200, 0.2],
+      [360, 0.5],
+      [460, 0.5],
+      [600, 0.1],
+      [800, 1],
+      [900, 1],
+      [1100, 0.1],
+      [1200, 0.1],
+    ]);
+    frames.find((f) => f.t >= 600)!.landmarks[JOINT.leftWrist].visibility = 0.1;
+    expect(collect(engine(), frames)).toEqual([]);
+  });
+
+  it("does not preserve rejected acquisition history through a source-time gap", () => {
+    const frames = trace(30, [
+      [0, 0.2],
+      [200, 0.2],
+      [360, 0.5],
+      [460, 0.5],
+      [600, 0.1],
+      [800, 1],
+      [900, 1],
+      [1100, 0.1],
+      [1200, 0.1],
+    ]);
+    for (const f of frames) if (f.t >= 600) f.t += 250;
+    expect(collect(engine(), frames)).toEqual([]);
+  });
+
+  it("documents the unresolved arm-lowering ambiguity without treating it as a verified punch", () => {
+    const frames = trace(30, [
+      [0, 0],
+      [300, 0],
+      [650, 1],
+      [750, 1],
+      [1100, 0],
+      [1250, 0],
+    ]);
+    for (const f of frames) {
+      const shoulder = f.landmarks[JOINT.leftShoulder];
+      const theta = -Math.PI / 2;
+      for (const joint of [JOINT.leftElbow, JOINT.leftWrist]) {
+        const p = f.landmarks[joint];
+        const x = ((p.x - shoulder.x) * f.width) / f.height,
+          y = p.y - shoulder.y;
+        p.x =
+          shoulder.x +
+          ((x * Math.cos(theta) - y * Math.sin(theta)) * f.height) / f.width;
+        p.y = shoulder.y + x * Math.sin(theta) + y * Math.cos(theta);
+      }
+    }
+    // Known limitation: these image-space thresholds also admit a lowered arm.
+    // This is a negative characterization, not validation of punch classification.
+    expect(collect(engine(), frames)).toHaveLength(1);
+  });
+  it.each([15, 30, 60])(
+    "counts a shorter same-arm repeat only after an accepted full extension at %i fps",
+    (fps) => {
+      for (const hand of ["left", "right"] as const) {
+        const points: [number, number][] = [
+          [0, 0],
+          [200, 0],
+          [450, 1],
+          [550, 1],
+          [700, 0.45],
+          [800, 0.45],
+          [1000, 0.75],
+          [1067, 0.75],
+          [1200, 0.45],
+          [1300, 0.45],
+        ];
+        const events = collect(engine(), trace(fps, points, hand));
+        expect(events.map((e) => e.hand)).toEqual([hand, hand]);
+        expect(events[1].extension).toBeLessThan(
+          MOTION_LIMITS.minimumExtension,
+        );
+        expect(events[1].startMs).toBeGreaterThan(events[0].endMs);
+        const isolated: [number, number][] = [
+          [0, 0.45],
+          [200, 0.45],
+          [400, 0.75],
+          [467, 0.75],
+          [600, 0.45],
+          [700, 0.45],
+        ];
+        expect(collect(engine(), trace(fps, isolated, hand))).toEqual([]);
+      }
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "does not count shallow straight-arm bobbing after an accepted stroke at %i fps",
+    (fps) => {
+      const points: [number, number][] = [
+        [0, 0.2],
+        [200, 0.2],
+        [450, 1],
+        [550, 1],
+        [700, 0.55],
+        [800, 0.55],
+        [1000, 0.7],
+        [1067, 0.7],
+        [1200, 0.55],
+        [1300, 0.55],
+      ];
+      expect(collect(engine(), trace(fps, points))).toHaveLength(1);
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "does not let unsupported prior gestures authorize a short repeat at %i fps",
+    (fps) => {
+      const points: [number, number][] = [
+        [0, 0.45],
+        [200, 0.45],
+        [450, 0.6],
+        [550, 0.6],
+        [700, 0.45],
+        [800, 0.45],
+        [1000, 0.75],
+        [1067, 0.75],
+        [1200, 0.45],
+        [1300, 0.45],
+      ];
+      expect(collect(engine(), trace(fps, points))).toEqual([]);
+    },
+  );
+
+  it.each([15, 30, 60])(
+    "expires the original full-extension context rather than renewing it on a short repeat at %i fps",
+    (fps) => {
+      const points: [number, number][] = [
+        [0, 0],
+        [200, 0],
+        [450, 1],
+        [500, 1],
+        [650, 0.45],
+        [733, 0.45],
+        [933, 0.75],
+        [1000, 0.75],
+        [1100, 0.45],
+        [1167, 0.45],
+        [1367, 0.75],
+        [1433, 0.75],
+        [1600, 0.45],
+        [1700, 0.45],
+      ];
+      const events = collect(engine(), trace(fps, points));
+      expect(events).toHaveLength(2);
+      expect(events[1].peakMs).toBeLessThan(1100);
+    },
+  );
+
+  it("clears accepted-repeat context across arm loss or duplicated timestamps", () => {
+    const points: [number, number][] = [
+      [0, 0],
+      [200, 0],
+      [450, 1],
+      [550, 1],
+      [700, 0.45],
+      [800, 0.45],
+      [1000, 0.75],
+      [1067, 0.75],
+      [1200, 0.45],
+      [1300, 0.45],
+    ];
+    for (const interruption of ["hidden", "duplicate", "reset"] as const) {
+      const frames = trace(30, points);
+      const index = frames.findIndex((f) => f.t >= 800);
+      if (interruption === "hidden")
+        frames[index].landmarks[JOINT.leftWrist].visibility = 0.1;
+      if (interruption === "duplicate") frames[index].t = frames[index - 1].t;
+      const detector = engine();
+      const events = frames.flatMap((f, i) => {
+        if (interruption === "reset" && i === index) detector.reset();
+        return detector.update(f).events;
+      });
+      expect(events, interruption).toHaveLength(1);
+    }
+  });
+
+  it("rejects a repeat whose first straight sample is one millisecond beyond the original peak deadline", () => {
+    const first = [
+      ...cycle().slice(0, 17),
+      ...[680, 740, 800, 860].map((t) => frame(t, 0.45)),
+    ];
+    const firstEvent = collect(engine(), first);
+    expect(firstEvent).toHaveLength(1);
+    const values = [
+      0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45,
+      0.45,
+    ];
+    const firstStraightIndex = 4;
+    const expiredStart =
+      firstEvent[0].peakMs +
+      MOTION_LIMITS.maximumRepeatPeakGapMs +
+      1 -
+      firstStraightIndex * 30;
+    const after = values.map((x, i) => frame(expiredStart + i * 30, x));
+    const before = values.map((x, i) => frame(expiredStart - 100 + i * 30, x));
+    expect(collect(engine(), [...first, ...before])).toHaveLength(2);
+    expect(collect(engine(), [...first, ...after])).toHaveLength(1);
+  });
+
+  it("does not carry early repeat support into a selected peak beyond the original deadline", () => {
+    const first = [
+      ...cycle().slice(0, 17),
+      ...[680, 740, 800, 860].map((t) => frame(t, 0.45)),
+    ];
+    const repeat: [number, number][] = [
+      [900, 0.5],
+      [930, 0.6],
+      [960, 0.68],
+      [990, 0.7],
+      [1020, 0.72],
+      [1050, 0.74],
+      [1080, 0.75],
+      [1110, 0.7],
+      [1140, 0.6],
+      [1170, 0.5],
+      [1200, 0.45],
+      [1230, 0.45],
+    ];
+    expect(
+      collect(engine(), [...first, ...repeat.map(([t, x]) => frame(t, x))]),
+    ).toHaveLength(2);
+    expect(
+      collect(engine(), [
+        ...first,
+        ...repeat.map(([t, x]) => frame(t + 40, x)),
+      ]),
+    ).toHaveLength(1);
+  });
+  it("does not renew repeat context from mixed repeat support and one unsupported full sample", () => {
+    const first = [
+      ...cycle().slice(0, 17),
+      ...[680, 740, 800, 860].map((t) => frame(t, 0.45)),
+    ];
+    const later: [number, number][] = [
+      [900, 0.5],
+      [930, 0.6],
+      [960, 0.7],
+      [990, 0.75],
+      [1020, 0.84],
+      [1050, 0.75],
+      [1080, 0.65],
+      [1110, 0.5],
+      [1140, 0.45],
+      [1170, 0.45],
+      [1200, 0.45],
+      [1230, 0.5],
+      [1260, 0.6],
+      [1290, 0.7],
+      [1320, 0.75],
+      [1350, 0.75],
+      [1380, 0.65],
+      [1410, 0.5],
+      [1440, 0.45],
+      [1470, 0.45],
+    ];
+    const events = collect(engine(), [
+      ...first,
+      ...later.map(([t, x]) => frame(t, x)),
+    ]);
+    expect(events).toHaveLength(2);
+    expect(events[1].peakMs).toBe(1020);
+    // The one larger point is not independently supported as a full stroke;
+    // later short movement cannot inherit a fresh deadline from it.
+  });
 });

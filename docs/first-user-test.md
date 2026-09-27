@@ -1,6 +1,8 @@
 # Next test: one natural 30-second round
 
-Use a fresh recording after the update. There is no target detection count to satisfy; keep your normal stance and movement.
+First try **Recheck detections** on an existing round to compare the updated rules using exactly the same saved tracking. **Use saved detections** restores the original result. This does not fix a misplaced wrist or alter the recording.
+
+For the next live check, use one fresh recording after the update. There is no target detection count to satisfy; keep your normal stance and movement.
 
 ## Record
 
@@ -8,9 +10,9 @@ Open [Practice](http://127.0.0.1:5173), keep **30 seconds**, and choose your usu
 
 Click **Enable camera → Record round**, then step back during the eight-second countdown. No second click is needed.
 
-- Start with a few clearly separated jabs and crosses at a comfortable pace.
-- Then try a few quicker **double jabs** and **jab–cross pairs**, resetting naturally between sequences. Add a double jab–cross if time allows.
-- Spend the last few seconds in guard or moving without punching.
+- Start with a few clearly separated jabs and right-hand crosses at a comfortable pace (left-hand crosses if your usual lead is right).
+- Then try a few quicker **double jabs** and **jab–cross pairs**, resetting naturally between sequences. Let your guard move naturally; do not force a long pause to satisfy the detector.
+- Spend the last few seconds without punching: relax and lower your hands, then return to guard. Check for false counts during this portion.
 
 This is a short sample, not a rigid script. Note extra, missed or interrupted actions rather than assuming the intended sequence happened. On a later day, repeat one similar round with the version held fixed; the earlier debugging footage cannot establish fresh-session performance.
 

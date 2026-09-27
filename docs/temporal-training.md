@@ -1,6 +1,6 @@
 # Experimental causal temporal recognition
 
-`ml/temporal.py` trains a small per-arm straight-action recognizer on saved pose observations. It is a runnable offline research baseline. It does not retrain the pose estimator, validate boxing form, or replace the browser detector. The first bounded experiment overfit its small same-person corpus and underperformed the deterministic detector, so its weights remain private and are not enabled in the app.
+`ml/temporal.py` trains a small per-arm straight-action recognizer on saved pose observations. It is a runnable offline research baseline. It does not retrain the pose estimator, validate boxing form, or replace the browser detector. The first bounded experiment overfit its small same-person corpus. A five-session follow-up with the same protocol recovered more actions but still produced many more false events than the deterministic detector. Its weights remain private and are not enabled in the app.
 
 ## Run locally
 

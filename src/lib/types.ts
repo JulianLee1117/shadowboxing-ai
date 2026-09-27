@@ -27,6 +27,8 @@ export interface PunchEvent {
   endMs: number;
   score: number; // heuristic signal score, NOT calibrated confidence
   extension: number;
+  // Spatial return to this event's origin observed by detectedAtMs; later return
+  // is not assessed, and this is not a technique-quality judgment.
   guardReturn: "returned" | "not-observed" | "unassessable";
   experimental: true;
   detectedAtMs?: number; // source time when the causal engine finalized the event

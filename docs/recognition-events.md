@@ -2,6 +2,22 @@
 
 These modules describe observed movement evidence. They do not validate technique, prove anatomical identity, infer missing punches, or use the requested drill to make a sequence appear. They do not speak or schedule cues. The source `PunchEvent` remains unchanged.
 
+## Straight-action boundaries and recovery
+
+`projected-straight-v6-observed-repeats` separates action counting from return to the original guard position. A supported observed extension still needs a flexed elbow and at least two recovery observations spanning 30 ms. Recovery can reach the original reach allowance or retract at least half the measured excursion. This allows a partial return between fast repetitions; it does not certify a complete or correct guard return. An arm held extended, an unsupported spike, or a missing active arm cannot satisfy this evidence.
+
+An isolated stroke still requires at least .45 torso lengths of observed reach increase and a supported projected elbow angle of at least 145 degrees. An **already accepted full stroke** can establish a short-lived reference for the same hand's next extension. A repeat then needs at least .225 torso lengths of its own travel, the same supported elbow straightening, and a reach at least .45 beyond the preceding full stroke's origin. Its own onset, path and recovery must still qualify. This avoids demanding a full isolated stroke's travel again after a partial return.
+
+The reference expires 650 ms after the preceding full stroke's observed peak. Repeat-only events cannot move its origin or refresh its deadline; only another independently full-qualified accepted event can create a new reference. Rejected candidates and tracking/timing/framing resets clear repeat context. Without a preceding accepted full stroke, a short motion remains uncounted. If the first jab in a double is missed, this rule cannot infer it or rescue the second using intended sequence labels.
+
+`startMs` is the observed onset estimate, `peakMs` is the observed maximum reach, and `endMs` is the first qualifying recovery observation. `detectedAtMs` is the later observation that confirms recovery. These are detector boundaries, not the full duration of a coach-labeled action. Earlier recovery can shorten an event enough to fail strict temporal-overlap matching even when it corresponds to a real punch. Keep those mismatches in reported evaluation results.
+
+`guardReturn` describes spatial return to that repetition's origin **by detection time**. `not-observed` does not mean that the hand failed to return later. This field is neither a defensive-skill grade nor a requirement for recognizing the next repetition. The confirmed flexed observation can rearm counting independently.
+
+A ready static reference can follow coherent inward motion over at least three observations and 60 ms; it cannot follow an outgoing hand. After a small candidate fails to establish a supported extension, only the last 200 ms of valid acquisition observations survive. The rejected candidate, peak evidence and ready reference do not survive. Tracking loss, timing gaps, invalid geometry and framing changes still discard the relevant history.
+
+Straight-looking relaxed arm lowering can still satisfy the projected-motion rules. A confidently misplaced wrist can also suggest a recovery that did not happen physically. Neither event detection nor the diagnostic confidence gate resolves these ambiguities. Do not convert those signals into technique corrections or hide false events by adjusting the reference labels.
+
 ## Combinations
 
 `src/lib/combinations.ts` exports `groupCombinations(events, options)` for a complete round and `CombinationRecognizer` for a future causal consumer. The supported sequences are jab–cross (`1-2`), double jab (`1-1`), double jab–cross (`1-1-2`), and jab–cross–jab (`1-2-1`). These are experimental temporal groupings, not coach-validated intent labels.
